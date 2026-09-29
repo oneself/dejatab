@@ -1,0 +1,280 @@
+#+STARTUP: overview
+#+TITLE: DejaTab - Task List
+#+STARTUP: showall
+
+* Relevant Files
+
+- [[file:2026-09-17-dejatab-prd.org][tasks/2026-09-17-dejatab-prd.org]] ::
+  DejaTab - Product Requirements Document
+- [[file:2026-09-23-dejatab-tsd.org][tasks/2026-09-23-dejatab-tsd.org]] ::
+  DejaTab - Technical Specification Document
+- [[https://claude.ai/artifact/LS6tp8qTuUuXuytCBhfJLq][Options page mockup]] ::
+  The design task 6.0 builds
+- [[file:2026-09-28-dejatab-manual-checks.org][Manual check list]] :: The
+  numbered Chrome checks that close 1.7, 5.2 and 5.8 and carry out 7.7
+  through 7.9
+- [[file:../manifest.json][manifest.json]] :: Manifest V3 declaration:
+  permissions, worker, options page, toolbar action, icons
+- [[file:../src/rules.js][src/rules.js]] :: Pure URL comparison. Canonical key
+  and difference explanation. No browser APIs
+- [[file:../test/rules.test.js][test/rules.test.js]] :: Unit tests for
+  =src/rules.js=
+- [[file:../src/settings.js][src/settings.js]] :: Stored shape, defaults,
+  storage access, per-site and exclusion host resolution, normalisation
+- [[file:../test/settings.test.js][test/settings.test.js]] :: Unit tests for the
+  pure parts of =src/settings.js=
+- [[file:../src/worker.js][src/worker.js]] :: The service worker. Navigation
+  event, tab gathering, decision, closing, notification
+- [[file:../src/banner.js][src/banner.js]] :: The content script injected to ask
+  the question
+- [[file:../src/options.html][src/options.html]] :: Options page markup
+- [[file:../src/options.css][src/options.css]] :: Options page styling, light
+  and dark
+- [[file:../src/options.js][src/options.js]] :: Binds the options page to
+  storage, runs the address tester, starts the cleanup sweep
+- [[file:../icons/][icons/]] :: Icons at 16, 32, 48 and 128 pixels, plus the
+  vector source
+- [[file:../docs/privacy.md][docs/privacy.md]] :: Privacy policy served through
+  GitHub Pages
+- [[file:../LICENSE][LICENSE]] :: The upstream MIT license and copyright notice,
+  kept
+- [[file:../README.md][README.md]] :: What DejaTab is, that it derives from
+  Unique Tabs, how to load it unpacked, how to run the tests
+
+* Notes
+
+- There is no build step. Chrome loads the files in [[file:../src/][src/]] as
+  they are, and publishing is a zip of the repository's extension files.
+- Tests run with Node's own runner, no framework installed: ~node --test~ for
+  everything, ~node --test test/rules.test.js~ for one file. Node 18 or later.
+- Only [[file:../src/rules.js][src/rules.js]] and the pure functions of
+  [[file:../src/settings.js][src/settings.js]] are unit tested. Everything else
+  is checked by hand against the checklist in 7.0, because it cannot run outside
+  Chrome.
+- Load the extension while working on it at ~chrome://extensions~ with developer
+  mode on, "Load unpacked", pointing at the repository root. The reload button
+  there picks up every change except a manifest change, which needs a full
+  reload of the extension.
+- Requirement numbers in brackets refer to the PRD. Read the TSD section named
+  in a sub-task before writing that sub-task's code.
+- Never let a failure close a tab. Every uncertain path in this extension ends
+  with tabs staying open [TSD, Error Handling].
+
+* Tasks
+
+- [~] 1.0 Repository and extension skeleton [6/7]
+  - [X] 1.1 Create the directory layout the TSD's Files table names:
+    [[file:../src/][src/]], [[file:../test/][test/]],
+    [[file:../icons/][icons/]], [[file:../docs/][docs/]], with
+    [[file:../tasks/][tasks/]] already in place.
+  - [X] 1.2 Add [[file:../LICENSE][LICENSE]] carrying the upstream MIT license
+    text and its copyright notice unchanged, and a second copyright line for
+    this work.
+  - [X] 1.3 Write [[file:../README.md][README.md]]: what DejaTab does, that it
+    derives from the MIT-licensed Unique Tabs extension, how to load it
+    unpacked, how to run the tests. No screenshots yet.
+  - [X] 1.4 Write [[file:../manifest.json][manifest.json]] at manifest version
+    3, declaring the ~storage~, ~webNavigation~, ~scripting~ and ~notifications~
+    permissions and host permission for all sites, with nothing else. Declare no
+    content script: the banner is injected on demand [FR-31].
+  - [X] 1.5 Point the manifest at the service worker as an ES module, at the
+    options page, and at a toolbar action whose click opens the options page
+    [FR-22].
+  - [X] 1.6 Drop placeholder icons at 16, 32, 48 and 128 pixels into
+    [[file:../icons/][icons/]] so the manifest resolves, and note in
+    [[file:../README.md][README.md]] that they are placeholders until 7.1
+    replaces them.
+  - [~] 1.7 (Chrome, checks 1 and 2) Verify: the extension loads at
+    ~chrome://extensions~ with no errors,
+    the toolbar icon opens an empty options page, and the permission warning
+    Chrome shows at install is the one the PRD expects.
+
+- [X] 2.0 URL matching rules [9/9]
+  - [X] 2.1 Read the TSD's "Canonical key" section in full before writing
+    anything. The nine steps are ordered, and the order is the specification.
+  - [X] 2.2 In [[file:../src/rules.js][src/rules.js]], define the built-in
+    tracking parameter list as a constant holding the sixteen names in R5. It
+    ships fixed and is never fetched.
+  - [X] 2.3 Implement the canonical key: parse, scheme, host, port, then the
+    early exit for R9, then path, query, fragment, joined into one string. An
+    address that does not parse yields no key, which means it matches nothing.
+  - [X] 2.4 Implement the two documented interactions: R9 makes the path, query
+    and fragment rules irrelevant, and R7 makes R5 and R6 irrelevant.
+  - [X] 2.5 Implement the difference explanation the address tester needs: given
+    two addresses that do not match, try each rule that is currently off, one at
+    a time, and name the first that would make them equal.
+  - [X] 2.6 When no single rule explains the difference, compare the keys piece
+    by piece and name the first piece that differs: scheme, host, path, query or
+    fragment.
+  - [X] 2.7 Write [[file:../test/rules.test.js][test/rules.test.js]] covering
+    cases 1 through 7 of the TSD's automated test list: every rule on its own,
+    the shipped defaults, the two interactions, tracking and user parameters,
+    parameter order and repeated names, path prefix edges, and the edge
+    addresses.
+  - [X] 2.8 Add the tester-explanation cases, item 9 of that list.
+  - [X] 2.9 Verify: ~node --test test/rules.test.js~ passes, and the module
+    imports cleanly in plain Node with no browser API stubs. If it needs a stub,
+    something belongs in [[file:../src/settings.js][src/settings.js]] instead.
+
+- [X] 3.0 Settings storage and host resolution [8/8]
+  - [X] 3.1 In [[file:../src/settings.js][src/settings.js]], define the shipped
+    defaults exactly as the TSD's Data Model tables state them, including
+    ~schemaVersion~ 1 and ~bannerTimeoutSeconds~ 30.
+  - [X] 3.2 Implement reading the single ~settings~ key from
+    ~chrome.storage.sync~, with every field falling back to its default
+    individually when it is missing or malformed [FR-30].
+  - [X] 3.3 Implement writing, reporting failure to the caller rather than
+    swallowing it, so the options page can show it and an Always or Never can
+    say it was not saved [TSD, Error Handling].
+  - [X] 3.4 Implement host suffix matching at dot boundaries, so ~example.com~
+    matches ~mail.example.com~ but not ~notexample.com~ [FR-14, FR-19].
+  - [X] 3.5 Implement rule resolution for a host: start from the global rules,
+    find every matching per-site entry, keep the one with the most labels,
+    overlay only the fields it names, and carry its ~autoClose~ flag back to the
+    caller [FR-18, FR-19, FR-20].
+  - [X] 3.6 Implement the exclusion check as a short circuit that runs before
+    resolution, since exclusion outranks everything [FR-15, FR-16].
+  - [X] 3.7 Implement normalisation of user input: trim and lower-case a typed
+    host, strip a scheme or path from it, reject what is left if it is not a
+    plausible host; clamp a timeout to 0 or the 5 to 600 range; trim parameter
+    names and reject empty ones.
+  - [X] 3.8 Write [[file:../test/settings.test.js][test/settings.test.js]] for
+    the pure parts: host matching including the most-specific-wins case, the
+    overlay leaving unnamed fields alone, and the normalisation cases of item 10
+    of the TSD's test list. Verify with ~node --test~.
+
+- [X] 4.0 Service worker: detect, decide, close, notify [9/9]
+  - [X] 4.1 Register the navigation event as the TSD's "Choosing the navigation
+    event" section specifies: ~webNavigation.onCompleted~ with a filter
+    restricting it to http and https, returning immediately unless the frame id
+    is zero [FR-1, FR-32].
+  - [X] 4.2 Reject internal addresses by scheme, for the tab that navigated and
+    for every candidate [FR-5].
+  - [X] 4.3 Gather candidates by asking Chrome for finished, unpinned tabs in
+    normal windows across every window of the profile, so tabs that could never
+    be duplicates are never marshalled in [FR-3, FR-4].
+  - [X] 4.4 Compute the survivor's key and each candidate's key using the
+    survivor's resolved rules for both sides, and collect the tabs whose key
+    matches [FR-2, FR-20].
+  - [X] 4.5 Implement the decision table: no duplicates does nothing, an
+    ~autoClose~ host closes at once, a pending prompt suppresses everything,
+    otherwise ask [FR-10].
+  - [X] 4.6 Implement closing: one tab per call, skipping a tab that is already
+    gone without stopping the rest [FR-11].
+  - [X] 4.7 Implement the post-close notification on one reused notification id,
+    no buttons, silent, with the abbreviated page label that keeps the host and
+    shortens the path in the middle [FR-12].
+  - [X] 4.8 Implement the pending question: write it to ~chrome.storage.session~
+    with a random prompt id, read it back when an answer arrives, clear it
+    before acting so a double click cannot act twice, ignore an answer whose id
+    does not match, and discard a question older than an hour.
+  - [X] 4.9 Cache the settings object for the worker's lifetime and clear the
+    cache from a ~chrome.storage.onChanged~ listener. This is the one piece of
+    state the worker keeps between events [TSD, Performance].
+
+- [~] 5.0 The prompt banner [6/8]
+  - [X] 5.1 Inject [[file:../src/banner.js][src/banner.js]] with
+    ~chrome.scripting.executeScript~ into the surviving tab only, in the
+    isolated world, passing the prompt id and an object holding the duplicate
+    count, the abbreviated page label, the host and the timeout [FR-31].
+  - [~] 5.2 (Chrome, checks 15 and 18) Treat an injection failure as a No:
+    nothing closes, silently. Check
+    this against the Chrome Web Store, the PDF viewer and a ~file://~ address
+    [TSD, Error Handling].
+  - [X] 5.3 In the banner, remove any banner left from an earlier question
+    first, then create one host element with a closed shadow root and build the
+    banner inside it, so no site can style it, read it or click it.
+  - [X] 5.4 Fix it to the top of the viewport above page content, stating the
+    count and the page in plain words, legible on a light or a dark site.
+  - [X] 5.5 Add four real buttons in the order Yes, No, Always, Never, Yes
+    focused, Yes and No together, Always and Never set apart because they change
+    settings. Escape answers No [FR-6, FR-9].
+  - [X] 5.6 Add the timeout: one timer, a fade out when it fires, then remove
+    the banner and send No. Hovering cancels the timer and leaving restarts it.
+    A timeout of 0 sets no timer at all [FR-9].
+  - [X] 5.7 Handle the four answers in the worker: Yes and Always close, Always
+    writes a per-site entry with ~autoClose~ and today's date, Never writes an
+    exclusion entry, No writes nothing [FR-7, FR-8].
+  - [~] 5.8 (Chrome, checks 3 to 9) Verify by hand: each answer does what it
+    says, the recorded answers
+    appear on the options page labelled with their origin, and a second
+    navigation while a banner is open changes nothing.
+
+- [X] 6.0 Options page [10/10]
+  - [X] 6.1 Build [[file:../src/options.html][src/options.html]] and
+    [[file:../src/options.css][src/options.css]] from the mockup: one scrolling
+    page, plain form controls, following the browser's light and dark setting,
+    no framework and no custom widgets.
+  - [X] 6.2 Lay the sections out in the order FR-23 fixes: global rules, the
+    tracking parameter list, the exclusion list, the per-site entries, the
+    prompt timeout, the address tester.
+  - [X] 6.3 State every rule as a plain sentence with an example pair of
+    addresses beside it, and give R6 its parameter field and R10 its segment
+    count.
+  - [X] 6.4 Render the tracking list with a checkbox per name, storing only the
+    names switched off.
+  - [X] 6.5 Implement the exclusion list: add, remove, and the origin label that
+    distinguishes an entry the user typed from one a Never wrote.
+  - [X] 6.6 Implement the per-site list: add, edit, remove, the overrides an
+    entry carries, and its close-without-asking checkbox with its origin label
+    [FR-17, FR-21].
+  - [X] 6.7 Implement the prompt timeout control, in seconds, explaining that 0
+    waits indefinitely [FR-9].
+  - [X] 6.8 Implement the address tester on
+    [[file:../src/rules.js][src/rules.js]] directly: resolve the rules for the
+    first address's host, show the shared key when they match, and name the rule
+    or the differing piece when they do not [FR-24].
+  - [X] 6.9 Implement "Clean up open tabs now": group by host, resolve each
+    host's rules, keep the tab the user is looking at or else the most recently
+    accessed, state the totals, and close only after the user agrees [FR-25].
+  - [X] 6.10 Implement "Reset to defaults" behind a confirmation, clearing every
+    rule, both lists and the timeout, and make every change on this page take
+    effect with no restart [FR-26, FR-27]. Reflect an Always or Never written
+    while the page is open, through ~chrome.storage.onChanged~.
+
+- [ ] 7.0 Release: identity, listing, verification [0/11]
+  - [ ] 7.1 Design the mark. This is manual work with no code, and it blocks the
+    store submission rather than the build. Done means: a vector source file
+    kept in the repository so it can be re-exported at any size; raster icons at
+    16, 32, 48 and 128 pixels, each legible at its own size rather than the 128
+    shrunk down, with the 16 judged in the tab strip and the 128 in the store
+    listing; artwork sharing nothing with upstream Unique Tabs, not its shape,
+    not its colours, not a recolouring of it, because the store rejects a
+    near-identical listing and the upstream listing is live; one line stating
+    what the mark is meant to say, so a later redesign has something to be
+    judged against; and all four sizes referenced from
+    [[file:../manifest.json][manifest.json]] and visibly correct in
+    ~chrome://extensions~ and the toolbar after a reload.
+  - [ ] 7.2 Register the Chrome Web Store developer account and pay the one-time
+    fee.
+  - [ ] 7.3 Write [[file:../docs/privacy.md][docs/privacy.md]] and serve it
+    through GitHub Pages at a stable URL, stating plainly that no data is
+    collected, that nothing leaves the browser, and that no page content is
+    read.
+  - [ ] 7.4 Write the listing's justification for the all-sites permission in
+    the words the PRD fixes: the access places the prompt on a page and compares
+    addresses, and nothing reads the page.
+  - [ ] 7.5 Capture at least one 1280 by 800 screenshot of the finished options
+    page, and write the short and the detailed description.
+  - [ ] 7.6 Make the repository public, before any store submission [PRD, Design
+    Considerations, release order].
+  - [ ] 7.7 (checks 1 to 45) Run the manual behaviour checklist, items 1
+    through 12 of the TSD's
+    Testing Strategy: the four answers, pinned and loading tabs, other windows,
+    internal pages, the Web Store, the options page reacting to an Always, the
+    tester agreeing with what happened, the sweep, and settings surviving a
+    restart and reaching a second machine.
+  - [ ] 7.8 (checks 24 to 29) Run the banner timeout checks, items 13 through
+    15: it fades and
+    closes nothing, hovering holds it open, and 0 waits indefinitely.
+  - [ ] 7.9 (checks 46 to 49) Run the performance checks with roughly two
+    hundred tabs open: no
+    DejaTab row in Chrome's task manager while reading, no added scripting on
+    the page's own thread in a performance recording, per-navigation work inside
+    the five-millisecond budget, and no worker wakes while navigating a
+    single-page application [FR-33, FR-34].
+  - [ ] 7.10 Use the extension daily for about a week before submitting to the
+    store, because a rule that closes a wanted tab is much cheaper to fix before
+    there are other users.
+  - [ ] 7.11 Submit to the Chrome Web Store.
+

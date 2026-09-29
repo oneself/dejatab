@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "DejaTab",
+  "version": "0.1.0",
+  "description": "Closes earlier tabs showing the same page, where you decide what counts as the same page.",
+  "permissions": [
+    "storage",
+    "webNavigation",
+    "scripting",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/worker.js",
+    "type": "module"
+  },
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "DejaTab settings"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

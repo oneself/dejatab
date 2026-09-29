@@ -1,0 +1,991 @@
+#+STARTUP: overview
+#+TITLE: DejaTab - Technical Specification Document
+#+STARTUP: showall
+#+PRD: [[file:2026-09-17-dejatab-prd.org][dejatab - PRD]]
+
+* Overview
+
+DejaTab closes tabs that show a page the user already has open, where "the
+same page" is a set of URL rules the user controls globally and per site.
+Before anything closes, the extension asks in a banner drawn on the page
+that just loaded, offering Yes, No, Always and Never.
+
+The technical approach in one paragraph: a Manifest V3 Chrome extension,
+written as plain ES modules with no build step, whose URL comparison lives
+in a single module that touches no browser API and is therefore testable
+with Node's built-in test runner. A background service worker is the only
+component that talks to the tab APIs. The prompt is a content script
+injected on demand into one tab, rendered inside a closed shadow root so it
+cannot be styled by the page and cannot restyle it. Settings live in one
+~chrome.storage.sync~ key so they follow the user's Chrome profile.
+
+The PRD's fourth goal and FR-31 through FR-34 make performance a
+requirement rather than a preference: the extension must not slow a page
+down and must use nothing at all between navigations. Three structural
+choices carry that weight, and they are structural on purpose, because a
+performance promise kept by careful coding erodes and one kept by
+architecture does not: no content script is declared, so no extension code
+runs on a page unless that page just produced a duplicate; the background is
+an event-driven worker Chrome unloads when idle, with no timer or alarm to
+wake it; and the only per-navigation work is one pass over the list of open
+tabs, after the page has finished loading.
+
+Decisions already made, with their reasons:
+
+|------------------------+------------------------------------------------|
+| Decision               | Reason                                         |
+|------------------------+------------------------------------------------|
+| Plain JS, no build     | Chrome loads ES modules directly. A bundler    |
+|                        | would add a step between editing and testing   |
+|                        | for a codebase of a few hundred lines.         |
+| Node's test runner     | The rules module has no browser dependencies,  |
+|                        | so it runs under plain Node. No dev            |
+|                        | dependency is installed.                       |
+| Fresh Manifest V3 code | Upstream Unique Tabs is Manifest V2 with one   |
+|                        | fixed rule. Its MIT license and copyright      |
+|                        | notice are kept, and the README credits it.    |
+| In-page banner prompt  | Four answers do not fit a Chrome notification, |
+|                        | which allows at most two buttons. See Open     |
+|                        | Question 1: this costs a host permission.      |
+|------------------------+------------------------------------------------|
+
+* Architecture
+
+** Files
+
+|-------------------------+----------------------------------------------------|
+| File                    | Responsibility                                     |
+|-------------------------+----------------------------------------------------|
+| ~manifest.json~         | Manifest V3 declaration: permissions, the          |
+|                         | service worker entry, the options page, the        |
+|                         | toolbar action, the icons.                         |
+| ~src/rules.js~          | Pure URL comparison. Turns a URL and a resolved    |
+|                         | rule set into a canonical key, and explains why    |
+|                         | two URLs differ. Touches no browser API.           |
+| ~src/settings.js~       | The stored shape, the shipped defaults, reads      |
+|                         | and writes to storage, host matching for the       |
+|                         | exclusion list and the per-site list, and rule     |
+|                         | resolution for a host.                             |
+| ~src/worker.js~         | The service worker. Listens for navigation,        |
+|                         | gathers tabs, decides, injects the banner,         |
+|                         | closes tabs, posts the notification.               |
+| ~src/banner.js~         | The content script injected into one tab to ask    |
+|                         | the question. Renders in a closed shadow root,     |
+|                         | reports the answer, removes itself.                |
+| ~src/options.html~      | The options page markup, following the mockup      |
+|                         | linked from the PRD.                               |
+| ~src/options.css~       | Options page styling, light and dark.              |
+| ~src/options.js~        | Binds the options page to storage, runs the        |
+|                         | address tester, starts the cleanup sweep.          |
+| ~test/rules.test.js~    | Node test-runner suite over ~src/rules.js~.        |
+| ~test/settings.test.js~ | Node test-runner suite over the pure parts of      |
+|                         | ~src/settings.js~, which is everything but the two |
+|                         | functions that touch storage.                      |
+|-------------------------+----------------------------------------------------|
+
+** Component relationships
+
+#+BEGIN_EXAMPLE
+   navigation event                     answer message
+   (top frame only)                     from the banner
+          |                                    ^
+          v                                    |
+  +---------------------------------------------------------+
+  |                    src/worker.js                        |
+  |  the only module that calls chrome.tabs / scripting /   |
+  |  notifications                                          |
+  +------+-------------------+-------------------+----------+
+         |                   |                   |
+         v                   v                   v
+  +--------------+   +----------------+   +----------------+
+  | settings.js  |   |   rules.js     |   | chrome.tabs    |
+  | storage.sync |   | canonical key  |   | every window   |
+  | host lookup  |   | pure, testable |   |                |
+  +--------------+   +----------------+   +----------------+
+         ^                   ^
+         |                   |
+  +------+-------------------+------+
+  |          options.js             |
+  |  edits settings, runs the       |
+  |  tester through the same rules  |
+  +---------------------------------+
+#+END_EXAMPLE
+
+The arrangement has one purpose: every comparison the user sees, whether it
+closed a tab or was typed into the address tester, runs through the same
+~rules.js~. The tester can never disagree with the matcher.
+
+** Service worker lifecycle
+
+A Manifest V3 service worker is not a long-lived background page. Chrome
+stops it after roughly 30 seconds without events and starts it again when
+the next event arrives. Two consequences shape the design:
+
+1. Nothing that must be correct may be held in a module-level variable
+   between events. Every piece of state that must outlive an event is
+   written to storage. There are two deliberate exceptions, and both are
+   safe for stated reasons rather than by luck. The settings cache,
+   described under Performance Considerations, is a copy of stored data and
+   is cleared by a storage event rather than trusted to survive. The parking
+   queue, which serialises the read and the write that park a question,
+   guards nothing across events at all: it orders work that is already in
+   flight, and a worker that has just started has none, which is exactly
+   what a fresh queue describes.
+2. A banner can wait for an answer far longer than the worker lives. The
+   pending question is therefore stored in ~chrome.storage.session~, which
+   is cleared when the browser closes and never syncs. When the answer
+   arrives, Chrome starts the worker, which reads the pending question back
+   and continues.
+
+** Choosing the navigation event
+
+Three Chrome events could start the work, and the choice is the single
+biggest lever on how often the worker wakes up.
+
+|--------------------------+----------------------------------------|
+| Event                    | Verdict                                |
+|--------------------------+----------------------------------------|
+| ~chrome.tabs.onUpdated~  | Rejected. It fires several times per   |
+|                          | navigation, once for the loading       |
+|                          | state, again for the title, again for  |
+|                          | the favicon, so the worker would be    |
+|                          | woken three or four times to do work   |
+|                          | that is needed once.                   |
+| ~webNavigation.onCommitt | Rejected. It fires before the page has |
+| ed~                      |                                        |
+|                          | finished loading, and once per hop of  |
+|                          | a redirect chain, so a banner could    |
+|                          | appear for an address the tab is       |
+|                          | already leaving.                       |
+| ~webNavigation.onComplet | Chosen. One event per completed        |
+| ed~                      |                                        |
+|                          | navigation, and it matches FR-1's      |
+|                          | wording. Registered with a URL filter  |
+|                          | restricting it to the http and https   |
+|                          | schemes, so Chrome never starts the    |
+|                          | worker for an internal page at all,    |
+|                          | and the handler returns immediately    |
+|                          | unless the frame id is zero.           |
+|--------------------------+----------------------------------------|
+
+Filtering at registration rather than in the handler is what keeps an idle
+browser idle: a filtered-out event does not start the worker, so it costs
+nothing beyond what Chrome already does.
+
+Address changes a page makes to itself, the kind a single-page application
+does when moving between views, do not fire this event. FR-34 excludes them
+deliberately: watching them means waking on every in-page view change on
+sites the user spends the most time in, which costs far more than the
+duplicates it would find.
+
+** Event flow for one navigation
+
+#+BEGIN_EXAMPLE
+  tab committed (top frame)
+        |
+        v
+  internal scheme? ----------- yes --> stop
+        | no
+        v
+  host excluded? ------------- yes --> stop
+        | no
+        v
+  build canonical key of the survivor
+  build keys of every other tab, drop pinned / loading
+        |
+        v
+  duplicates found? ---------- no ---> stop
+        | yes
+        v
+  host set to close without asking? -- yes --> close, notify
+        | no
+        v
+  a prompt already pending? -- yes --> stop
+        | no
+        v
+  inject banner into the survivor tab
+        |
+        +-- injection fails -----------> stop, nothing closes
+        |
+        v
+  park the pending question in session storage
+        |
+        v
+  answer arrives: Yes / Always -> close, notify
+                  No  / Never  -> nothing closes
+                  Always -> write a per-site entry
+                  Never  -> write an exclusion entry
+#+END_EXAMPLE
+
+* Data Model
+
+** Where settings live
+
+All settings live in ~chrome.storage.sync~ under a single key, ~settings~.
+One key is used rather than one key per section because the rules are read
+together on every navigation, and a single read is both simpler and
+cheaper. Chrome caps one sync item at 8 KB, which the Open Questions
+address.
+
+The pending question lives in ~chrome.storage.session~ under the key
+~pending~. Session storage is memory-backed, never synced, and cleared when
+Chrome closes, which is exactly the lifetime a pending question should
+have.
+
+** The settings object
+
+|------------------------+--------+----------------------------------------|
+| Field                  | Type   | Default and meaning                    |
+|------------------------+--------+----------------------------------------|
+| ~schemaVersion~        | number | 1. Lets a future version recognise and |
+|                        |        | migrate an older stored shape.         |
+| ~rules~                | object | The global rule values, below.         |
+| ~bannerTimeoutSeconds~ | number | 30. Seconds the prompt waits before    |
+|                        |        | it gives up, which counts as No. 0     |
+|                        |        | waits indefinitely. Allowed: 0, or     |
+|                        |        | any value from 5 to 600.               |
+| ~excludedHosts~        | list   | Empty. Host strings the extension      |
+|                        |        | ignores completely.                    |
+| ~sites~                | list   | Empty. Per-site entries, below.        |
+|------------------------+--------+----------------------------------------|
+
+** The rules object
+
+Every field appears in both the global ~rules~ object and, optionally, in a
+per-site entry's own partial rules object. A per-site entry names only the
+fields it changes.
+
+|-----------------------+---------+-----------------------------------|
+| Field                 | Type    | Default and meaning               |
+|-----------------------+---------+-----------------------------------|
+| ~ignoreFragment~      | boolean | true. R1, drop everything after # |
+| ~ignoreTrailingSlash~ | boolean | true. R2                          |
+| ~ignoreWww~           | boolean | false. R3                         |
+| ~ignoreScheme~        | boolean | false. R4                         |
+| ~dropTrackingParams~  | boolean | true. R5                          |
+| ~trackingParamsOff~   | list    | Empty. Names from the built-in    |
+|                       |         | list the user switched off.       |
+| ~dropUserParams~      | boolean | true. R6, active only when        |
+|                       |         | ~userParams~ is non-empty.        |
+| ~userParams~          | list    | Empty. Extra parameter names.     |
+| ~dropQuery~           | boolean | false. R7                         |
+| ~ignoreParamOrder~    | boolean | false. R8                         |
+| ~sameHost~            | boolean | false. R9                         |
+| ~samePathPrefix~      | boolean | false. R10                        |
+| ~pathPrefixSegments~  | number  | 1. The N of R10, from 1 to 8.     |
+|-----------------------+---------+-----------------------------------|
+
+The built-in tracking parameter list is a constant in ~rules.js~, not
+stored: ~utm_source~, ~utm_medium~, ~utm_campaign~, ~utm_term~,
+~utm_content~, ~utm_id~, ~gclid~, ~gbraid~, ~wbraid~, ~fbclid~,
+~msclkid~, ~yclid~, ~mc_cid~, ~mc_eid~, ~igshid~, ~_ga~. Storing only the
+names the user switched off keeps the stored object small and lets a later
+release extend the list without a migration.
+
+** A per-site entry
+
+|-------------+---------+---------------------------------------------------|
+| Field       | Type    | Meaning                                           |
+|-------------+---------+---------------------------------------------------|
+| ~host~      | string  | Lower-case host, no scheme, no path, no port.     |
+|             |         | Matches this host and its subdomains.             |
+| ~rules~     | object  | Partial rules object. Only the fields it names    |
+|             |         | override the global values.                       |
+| ~autoClose~ | boolean | false. When true, duplicates on this host close   |
+|             |         | with no prompt. Set by the Always answer.         |
+| ~source~    | string  | "user" or "always". Drives the "set by Always"    |
+|             |         | label on the options page. Nothing else reads it. |
+| ~addedAt~   | string  | ISO 8601 date the entry was created, shown next   |
+|             |         | to the label.                                     |
+|-------------+---------+---------------------------------------------------|
+
+An exclusion entry is the same idea with less to it: the list holds objects
+carrying ~host~, ~source~ ("user" or "never") and ~addedAt~.
+
+** The pending question
+
+|-------------------+--------+-------------------------------------------|
+| Field             | Type   | Meaning                                   |
+|-------------------+--------+-------------------------------------------|
+| ~promptId~        | string | Random id, sent to the banner and         |
+|                   |        | returned with the answer. An answer whose |
+|                   |        | id does not match the stored one is       |
+|                   |        | ignored, which discards stale banners.    |
+| ~survivorTabId~   | number | The tab that just navigated and that      |
+|                   |        | carries the banner.                       |
+| ~host~            | string | The survivor's host, the subject of an    |
+|                   |        | Always or Never answer.                   |
+| ~duplicateTabIds~ | list   | Tab ids to close on a Yes. Re-validated   |
+|                   |        | when the answer arrives.                  |
+| ~survivorKey~     | string | The survivor's canonical key, kept so the |
+|                   |        | close can re-check that a candidate still |
+|                   |        | matches rather than trusting the id list. |
+| ~rules~           | object | The resolved rules the key was computed   |
+|                   |        | with, so the re-check uses the same rules |
+|                   |        | the question was asked under.             |
+| ~pageLabel~       | string | The abbreviated address shown in the      |
+|                   |        | notification after the close.             |
+| ~timeoutSeconds~  | number | The timeout the banner was given. It      |
+|                   |        | decides whether this record expires: a    |
+|                   |        | banner told to wait indefinitely keeps    |
+|                   |        | its question, every other record is       |
+|                   |        | discarded after an hour.                  |
+| ~createdAt~       | number | Milliseconds since the epoch. Used to     |
+|                   |        | discard a question older than one hour.   |
+|-------------------+--------+-------------------------------------------|
+
+* API Design
+
+There is no network API. What needs specifying is the message contract
+between the three contexts (service worker, banner, options page) and the
+Chrome API surface the extension declares.
+
+** Messages
+
+All messages travel over ~chrome.runtime~ messaging. Every message carries
+a ~type~ field, and every type is prefixed ~dejatab/~ so an unrelated
+message from another extension or a page script is easy to reject.
+
+|----------------------+------------------+--------------------------------|
+| Type                 | Direction        | Payload and reply              |
+|----------------------+------------------+--------------------------------|
+| ~dejatab/answer~     | banner to worker | ~promptId~ and ~answer~, one   |
+|                      |                  | of yes, no, always, never. The |
+|                      |                  | worker replies with nothing;   |
+|                      |                  | the banner removes itself as   |
+|                      |                  | soon as the message is sent.   |
+| ~dejatab/cleanup~    | options to       | No payload. The worker replies |
+|                      | worker           | with the number of tabs it     |
+|                      |                  | would close and the number of  |
+|                      |                  | groups they fall into, so the  |
+|                      |                  | options page can ask for       |
+|                      |                  | confirmation before anything   |
+|                      |                  | happens.                       |
+| ~dejatab/cleanup-go~ | options to       | The token returned by          |
+|                      | worker           | ~dejatab/cleanup~. The worker  |
+|                      |                  | closes the tabs it counted and |
+|                      |                  | replies with how many closed.  |
+|----------------------+------------------+--------------------------------|
+
+Settings changes need no message. The options page writes to storage, and
+the worker reads settings fresh on every navigation, so a change is live
+immediately. The options page listens to ~chrome.storage.onChanged~ so that
+an Always or Never answer appears in the lists while the page is open.
+
+** Banner injection
+
+The banner is not declared in the manifest as a content script that runs
+everywhere. It is injected only at the moment a question must be asked,
+with ~chrome.scripting.executeScript~ targeting one tab id, in the isolated
+world. Two arguments are passed in: the prompt id and a small object
+holding the number of duplicates, the abbreviated page label, the host and
+the timeout in seconds.
+This matters for the privacy story: the extension has permission to inject
+into any site, but code only ever runs on a site at the moment that site
+produced a duplicate, and that code reads nothing from the page.
+
+** Declared permissions
+
+|------------------+------------------------------------------------|
+| Permission       | Why it is needed                               |
+|------------------+------------------------------------------------|
+| ~storage~        | Settings and the pending question.             |
+| ~webNavigation~  | The one navigation event, registered with a    |
+|                  | scheme filter. Adds no warning of its own once |
+|                  | host permission is granted.                    |
+| ~scripting~      | Injecting the banner on demand.                |
+| ~notifications~  | The notification after a close.                |
+| ~http://*/*~ and | Two things at once: reading the addresses      |
+| ~https://*/*~    | of open tabs so they can be compared, and      |
+|                  | injecting the banner into the page that        |
+|                  | just loaded. Written as the two web            |
+|                  | schemes rather than ~<all_urls>~: narrower     |
+|                  | by every scheme the extension never acts       |
+|                  | on, and it matches the navigation filter.      |
+|                  | The install warning is the same either way.    |
+|------------------+------------------------------------------------|
+
+The ~tabs~ permission is not declared. With host permission for the web,
+tab addresses are already readable, and declaring both would widen the
+permission warning for nothing.
+
+* Logic and Processing
+
+** Resolving which rules apply
+
+Given a host, the resolved rule set is computed as follows.
+
+1. Start from the global ~rules~ object.
+2. Find every per-site entry whose ~host~ equals the given host or is a
+   suffix of it at a dot boundary, so ~example.com~ matches
+   ~mail.example.com~ but not ~notexample.com~.
+3. Of those, keep the one with the most dot-separated labels. That is the
+   most specific entry: ~mail.example.com~ beats ~example.com~.
+4. Overlay that entry's partial rules on the global values. Fields the
+   entry does not name keep their global value. No two entries are ever
+   blended.
+5. The entry's ~autoClose~ flag rides along with the resolved rules, since
+   the caller needs it in the same breath.
+
+Exclusion is checked before any of this, with the same suffix matching, and
+short-circuits everything.
+
+** Canonical key
+
+The heart of the extension. Two tabs are duplicates when their canonical
+keys are identical strings. The key is built in this order, and the order
+matters because later steps depend on earlier ones.
+
+1. Parse the address. If it does not parse, return no key at all, which
+   means the tab can never match anything.
+2. Take the scheme. If ~ignoreScheme~ is on, drop it. Otherwise keep it, so
+   the http and https copies of a page stay different pages.
+3. Take the host, lower-cased, with one trailing dot removed. A fully
+   qualified host carries that dot for the root label and Chrome keeps it, so
+   ~example.com.~ and ~example.com~ are one host written two ways and must
+   key alike; the settings module strips it the same way, so exclusion and
+   per-site rules agree with the matcher. One dot only, so a host ending in
+   two dots stays the implausible thing it looks like. This was measured on
+   Node, whose parser keeps the dot; confirming Chrome's is a checklist item,
+   and the stripping is harmless either way. Then, if ~ignoreWww~ is on,
+   strip a leading ~www.~ once: the two strip opposite ends.
+4. Take the port, unless it is the default port for the scheme, in which
+   case drop it so the explicit and implicit forms agree.
+5. If ~sameHost~ is on, the key is the scheme, host and port assembled, and
+   nothing after them appears in it: every address on the host is one page.
+   The later pieces are still computed, and dropped only when the key is
+   assembled, because the tester names the piece that differs and would
+   otherwise have nothing to name on a host where this rule is on. Do not
+   turn this back into an early exit.
+6. Take the path. If ~samePathPrefix~ is on, keep only the first
+   ~pathPrefixSegments~ segments and drop the rest. If
+   ~ignoreTrailingSlash~ is on, remove a trailing slash unless the path is
+   just the root.
+7. Take the query. If ~dropQuery~ is on, drop it entirely and skip to the
+   fragment. Otherwise remove every built-in tracking parameter that is not
+   listed in ~trackingParamsOff~ while ~dropTrackingParams~ is on, then
+   remove every name in ~userParams~ while ~dropUserParams~ is on. If
+   ~ignoreParamOrder~ is on, sort the surviving parameters by name and then
+   by value. Parameter name comparison is case-sensitive, matching how
+   servers treat them.
+8. Take the fragment. If ~ignoreFragment~ is on, drop it.
+9. Join the surviving pieces into one string. That string is the key.
+
+Two rule interactions are worth stating plainly, because a user can switch
+on both halves of each pair:
+
+- ~sameHost~ makes ~samePathPrefix~, the query rules and the fragment rule
+  irrelevant, because it stops at the host.
+- ~dropQuery~ makes ~dropTrackingParams~ and ~dropUserParams~ irrelevant,
+  because there is no query left to filter.
+
+** Choosing duplicates after a navigation
+
+1. The event source is the top-frame navigation of a tab. A navigation in
+   an embedded frame is not an event the extension listens for at all.
+2. Reject internal addresses by scheme: ~chrome:~, ~chrome-extension:~,
+   ~devtools:~, ~view-source:~, ~about:~, and the new tab page. This
+   applies both to the tab that navigated and to every candidate.
+3. Load settings and resolve the rules for the survivor's host, in one
+   storage read.
+4. Ask for every tab in every window of the current profile.
+5. Drop the survivor itself, any pinned tab, any tab still loading, and any
+   tab whose host is excluded.
+6. Compute the survivor's key and each remaining tab's key, using the
+   survivor's resolved rules for both sides. The rules of the page the user
+   just landed on decide the comparison, so one comparison never mixes two
+   rule sets.
+7. Tabs whose key equals the survivor's key are the duplicates.
+
+** Deciding what to do
+
+|----------------------+-----------------------------------------------|
+| Condition            | Action                                        |
+|----------------------+-----------------------------------------------|
+| No duplicates        | Nothing happens. No prompt, no notification.  |
+| Host has ~autoClose~ | Close the duplicates, then notify.            |
+| A prompt is pending  | Nothing happens. The page is caught the next  |
+| and less than an     | time it is navigated to.                      |
+| hour old             |                                               |
+| A prompt is pending  | The old question no longer suppresses: it is  |
+| and older than an    | left answerable, but this navigation is       |
+| hour                 | asked about. Only a question with a 0         |
+|                      | timeout can get this old, and without the cap |
+|                      | a page that deleted such a banner would keep  |
+|                      | the extension quiet for as long as that tab   |
+|                      | lived. An hour of quiet is the most it can    |
+|                      | buy.                                          |
+| Otherwise            | Inject the banner and park the question.      |
+|----------------------+-----------------------------------------------|
+
+** Acting on the answer
+
+1. Read the pending question from session storage. If it is missing, or its
+   ~promptId~ does not match the answer's, ignore the answer.
+2. Clear the pending question first, so a double click cannot act twice.
+3. On Yes or Always, close the duplicates, but never on the strength of the
+   id list alone. The record carries the survivor's key and the rules it was
+   computed with, and each tab is fetched and closed only when all four of
+   these still hold: it is not pinned, its address is a web address, its
+   host is not excluded under the settings as they are at that moment, and
+   its key under the record's rules still equals the survivor's. A tab that
+   fails any of them is skipped, as is one the user has already closed, and
+   no skip stops the others. This is why tabs are removed one per call
+   rather than in a batch.
+4. The re-check is what makes the extension's worst outcome impossible. The
+   window between the question and the answer is the whole timeout, and in
+   it a matching tab can navigate somewhere the user cares about, be
+   pinned, or come under a new exclusion. Closing the remembered ids would
+   take that tab: FR-4 and FR-15 would both be broken by a plan that was
+   correct when it was made. The ids are therefore a candidate set, never a
+   decision.
+5. On Always, add or update a per-site entry for the host with ~autoClose~
+   true, ~source~ "always" and today's date. An existing entry for that
+   exact host keeps its rule overrides and only gains the flag.
+6. On Never, add an exclusion entry for the host with ~source~ "never", and
+   clear the ~autoClose~ flag on every per-site entry the exclusion shadows:
+   the named host, and any host that is a subdomain of it at a dot boundary.
+   The entries keep their rule overrides, their ~source~ and their
+   ~addedAt~; only the flag changes. The exclusion alone would be enough
+   while it stands, since it outranks everything, but clearing the flag is
+   what stops a later removal of the exclusion from silently rearming an
+   Always the user has forgotten about.
+7. On No, nothing is written at all.
+8. After a close, post the notification.
+
+** The banner itself
+
+1. The injected script first removes any banner it finds from an earlier
+   question, so a tab never shows two.
+2. It creates one host element, attaches a closed shadow root, and builds
+   the banner inside it. A closed shadow root means page scripts cannot
+   reach into the banner and page styles cannot reach it either, which
+   matters because the banner must be legible on any site.
+3. The banner is fixed to the top centre of the viewport, above page
+   content, and states the count and the page in the user's own words, for
+   example "DejaTab found 2 other tabs on this page."
+4. Four real buttons, in the order Yes, No, Always, Never, with Yes focused
+   on appearance. Yes and No sit together; Always and Never are separated,
+   because they change settings. Escape answers No.
+5. On a click the script sends the answer, removes the host element and
+   stops. It holds no state and survives no navigation.
+6. An answer is accepted only from a banner that is still where DejaTab put
+   it. A closed shadow root seals the tree inside it, not the element it
+   hangs on, and that element lives in the page's own document, so a page
+   can rewrite its inline style, move it into a clipping or transformed
+   container, or delete it. Inline declarations marked important do hold
+   against a page's stylesheet, and ~all: initial~ marked important is what
+   pins most of the properties, but geometry beats the cascade: a transform,
+   filter, clip-path, contain or will-change on an ancestor establishes the
+   containing block for a fixed element and composites the subtree. Left
+   alone, that lets a page put the Yes button under whatever it invites the
+   user to click and collect a genuinely trusted click. Three checks run
+   before any answer is accepted: the event must be trusted, which also
+   rejects a page dispatching its own Escape, since the window is shared
+   between the two worlds; the host's parent must still be the document's
+   body or root element; and the host's rectangle must still be near the top
+   of the viewport, roughly the full width, and tall enough to be the bar the
+   user saw. A failed check answers No, removes the banner and clears the
+   question, so the page gains nothing and the next navigation asks again.
+7. What the checks cannot catch, and what the documentation therefore
+   admits: an ancestor that leaves the geometry alone while making the banner
+   invisible, for instance a filter reducing its opacity to almost nothing.
+   The checks take away the attacker's choice of where, which is what turns a
+   working attack into hoping the user clicks the top strip of a page. They
+   do not make the banner's placement the extension's to decide.
+6. If the timeout is not zero, the script sets one timer for it. When the
+   timer fires the banner fades out over a fraction of a second, removes
+   itself and sends the answer No, which clears the pending question so the
+   next navigation to that page can ask again. The timer is the only thing
+   the banner leaves running and it is cleared the moment a button is
+   clicked.
+7. Hovering the banner cancels the timer, so a user who is reading the
+   question does not lose it mid-sentence. Moving the pointer away starts
+   the full timeout again.
+
+** The notification
+
+One notification id is reused, so a burst of closes updates one popup
+rather than stacking several. It is a basic notification with a title
+naming the count, a message holding the abbreviated page label, no buttons,
+and silent. The abbreviation keeps the host and shortens the path in the
+middle so both ends stay readable within about sixty characters.
+
+** The address tester
+
+1. Both addresses are parsed. An address that does not parse is reported as
+   such, naming which field is at fault.
+2. The rules used are the ones that apply to the first address's host,
+   including any per-site entry, so the tester answers what the extension
+   would actually do rather than what the global rules alone would do.
+3. Both keys are computed. Equal keys mean the same page, and the tester
+   shows the shared key so the user can see what survived.
+4. Different keys mean the tester must explain itself, and it reports two
+   things rather than one: what differs, and the switch that would match
+   them. What differs comes first, because it is what the user can act on.
+5. What differs is found by comparing the two addresses piece by piece,
+   each piece first put through the rules that are currently on, in the
+   order scheme, host, port, path, query, fragment. The first piece that
+   differs is named. The comparison is of the addresses, not of the
+   assembled keys: a key omits pieces, for instance everything after the
+   host when R9 is on, and comparing keys would make most pieces
+   unreportable.
+6. The switch is found by trying each rule that is currently off, one at a
+   time, recomputing both keys with that one rule on. The first rule that
+   makes the keys equal is named. When none does, the tester says so rather
+   than naming a rule.
+7. The trial order is narrowest first, by how much each rule discards: R1
+   to R6, then R8, R7, R10, R9. Plain R1 to R10 order would let R7 explain
+   every parameter-order difference and R9 every path difference, so R8 and
+   R10 could never be named and the tester would always recommend the
+   bluntest switch that works. The order follows the specification's own
+   subsumption statements: R7 makes R5, R6 and R8 irrelevant, and R9 makes
+   R10 irrelevant.
+
+** The cleanup sweep
+
+Started from the options page, so the confirmation is part of that page and
+no banner is involved.
+
+1. Every tab in every window is collected, and excluded, pinned, loading
+   and internal tabs are dropped.
+2. Each host's rules are resolved once and remembered, since resolution is
+   the only per-host work.
+3. Every tab's key is computed with the rules of its own host, and all the
+   keys go into one table: tabs sharing a key form a duplicate group,
+   whatever their hosts. The keys are compared across every tab and not
+   within a host, because a rule can make two hosts one page: R3 pairs
+   ~www.example.com~ with its apex, and grouping by host first would hide
+   exactly the duplicates that rule exists to catch.
+4. One tab in each group survives: the tab the user is currently looking
+   at if it is in the group, otherwise the most recently accessed one.
+5. The options page states the totals, for example "Close 7 tabs across 3
+   pages?", and closes them only after the user agrees.
+6. The count is parked in session storage as a plan: a single-use token and
+   one entry per tab holding its id and the key it had when it was counted.
+   The key is what makes the re-check below possible for a plan that spans
+   many hosts, and the token is what stops a second confirmation, or a
+   double-clicked button, from closing another set of tabs.
+7. Between the count and the agreement the tab strip can change, so the
+   confirmed close re-checks every tab exactly as step 3 of "Acting on the
+   answer" does, against the key its own host's rules produce. The reply
+   reports how many tabs actually closed, so a user told seven who sees
+   five closed was told the truth at the time and is told the truth after.
+6. The notification follows, as after any close.
+
+* Security and Authorization
+
+- There is no account, no server and no authorization boundary. Everything
+  runs locally in the user's profile.
+- The extension holds host permission for all sites. This is the cost of
+  the banner, and it is the single most important thing to be honest about
+  in the store listing and the privacy policy: the permission allows
+  reading page addresses and injecting the banner, and the code does
+  neither more nor less than that. No page content is read, no DOM is
+  inspected, nothing is sent anywhere.
+- The banner runs in the isolated world, so page scripts cannot call into
+  it, and inside a closed shadow root, so page scripts cannot walk into its
+  DOM either.
+- Every incoming message is checked for the ~dejatab/~ prefix and for a
+  sender that is this extension. An answer must also carry the pending
+  prompt id, which a page script cannot guess.
+- Host entries typed on the options page are normalised before they are
+  stored: trimmed, lower-cased, a scheme or path removed, and rejected if
+  what is left is not a plausible host. This prevents an entry that can
+  never match and keeps the suffix comparison honest.
+- Parameter names typed on the options page are trimmed and rejected if
+  empty, but are otherwise taken as typed, since any string can legally be
+  a parameter name.
+- Stored settings are treated as untrusted on read: a missing or malformed
+  field falls back to its shipped default rather than throwing.
+
+* Error Handling
+
+|--------------------------+---------------------------------------------------|
+| Situation                | Behaviour                                         |
+|--------------------------+---------------------------------------------------|
+| Banner injection fails   | Nothing closes. This covers the Chrome Web        |
+| (internal page, Web      | Store, the PDF viewer, file addresses without     |
+| Store, PDF viewer,       | the file-access setting, and any page Chrome      |
+| file addresses)          | refuses. Treated as a No, silently: a failure     |
+|                          | to ask must never become a close.                 |
+| A duplicate tab is       | Skipped. Each tab is closed in its own call       |
+| already gone             | so one failure does not cancel the rest.          |
+| The survivor tab is      | The answer can still arrive from a banner in      |
+| closed before answering  | a tab that is going away; the pending             |
+|                          | question is discarded and nothing closes.         |
+| Pending question older   | Discarded on read. A banner left unanswered for   |
+| than one hour            | an hour no longer reflects the tab strip. The     |
+|                          | hour does not apply when the timeout is 0: a      |
+|                          | banner told to wait indefinitely must still be    |
+|                          | answerable, so its question lives as long as it   |
+|                          | does. One record either way, and session          |
+|                          | storage clears it when Chrome closes.             |
+| Settings read fails or   | The shipped defaults are used for that read.      |
+| returns nonsense         | Nothing is overwritten, so a transient            |
+|                          | failure cannot wipe a user's rules.               |
+| Settings write fails,    | The in-memory values stay in effect for the       |
+| including sync quota     | session. The options page shows a plain           |
+|                          | message naming the cause. An Always or Never      |
+|                          | that could not be saved says so rather than       |
+|                          | silently forgetting.                              |
+| Notification cannot be   | Ignored. A close is never held up by the          |
+| shown                    | notification that reports it.                     |
+| A plan has gone stale    | Every tab is re-checked at the moment of the      |
+| between the question and | close: unpinned, loaded, a web address, its host  |
+| the answer               | not excluded now, and its key still equal to the  |
+|                          | survivor's. A tab failing any of them is spared,  |
+|                          | and the count names what actually closed. Step 3  |
+|                          | of Acting on the answer says why the id list is a |
+|                          | candidate set rather than a decision.             |
+| A question outlives its  | It stops suppressing after an hour while staying  |
+| banner                   | answerable. Only a question with a 0 timeout gets |
+|                          | that old, and the cap is what stops a page that   |
+|                          | deleted such a banner from keeping the extension  |
+|                          | quiet for as long as that tab lives.              |
+| An address will not      | It matches nothing, which means it never          |
+| parse                    | closes a tab. In the tester it is reported as     |
+|                          | an invalid address.                               |
+|--------------------------+---------------------------------------------------|
+
+The rule behind the table: every failure path ends with tabs staying open.
+The extension's worst outcome is closing something wanted, so every
+uncertainty resolves toward doing nothing.
+
+* Performance Considerations
+
+The PRD makes this a requirement (goal 4, FR-31 through FR-34), so this
+section states a budget, the choices that meet it, and how it is checked.
+
+** The budget
+
+|--------------------------+------------------------------------------|
+| While                    | The extension may cost                   |
+|--------------------------+------------------------------------------|
+| A page is loading        | Nothing. No extension code runs on the   |
+|                          | page, and the worker is not woken until  |
+|                          | loading has finished.                    |
+| A page has just finished | One worker wake, one settings read, one  |
+| loading                  | tab listing, one string built per tab.   |
+|                          | Target: under five milliseconds at two   |
+|                          | hundred open tabs, none of it on the     |
+|                          | page's thread.                           |
+| A duplicate was found    | One script injection into one tab, a few |
+| and                      |                                          |
+| the user is being asked  | kilobytes, running once.                 |
+| The user is reading,     | Nothing whatsoever. No process of the    |
+| typing                   |                                          |
+| or scrolling             | extension's own should appear in         |
+|                          | Chrome's task manager.                   |
+|--------------------------+------------------------------------------|
+
+** What keeps it there
+
+- No declared content script. This is the largest single choice. A content
+  script declared for all sites is fetched, parsed and executed on every
+  page load, whether or not it has anything to do. DejaTab declares none:
+  the banner is injected only into a tab that has just produced a
+  duplicate, which for most navigations never happens.
+- No resident background process. The Manifest V3 worker is started by an
+  event and stopped by Chrome when idle. Nothing keeps it alive: no alarm,
+  no interval, no long-lived connection, no badge to update. Since a wake
+  costs the worker's own startup, the worker file stays small: it imports
+  ~rules.js~, ~settings.js~ and ~banner.js~, the last only because the banner
+  is handed to the injection call as a function, and never the options-page
+  code.
+- One filtered event. The navigation event is registered with a scheme
+  filter, so Chrome does not start the worker for an internal page, and
+  addresses a page changes by itself never wake it at all.
+- Work that happens after loading. The event fires once the page has
+  finished, so nothing the extension does can delay a paint, a script or an
+  input, and all of it runs in the extension's own worker rather than on a
+  page's thread.
+- A cached settings object, held for the worker's lifetime and cleared by a
+  storage change event, so a burst of navigations reads storage once rather
+  than once each.
+- Filtering in the browser rather than in JavaScript. The tab listing asks
+  Chrome for finished, unpinned tabs in normal windows, so tabs that could
+  never be duplicates are never marshalled into the worker.
+- A lookup, not a pairwise comparison. Each tab yields one canonical key and
+  duplicates are found by looking keys up in a map, so cost grows with the
+  number of tabs rather than with its square.
+- Bursts collapse. A redirect chain or a rapid series of navigations
+  produces at most one prompt, because a pending question suppresses the
+  rest. Nothing queues up behind it.
+- Writes only on a user action: editing the options page, or answering
+  Always or Never. There is no automatic write, so Chrome's sync write-rate
+  limits are unreachable in normal use.
+
+** How it is checked
+
+A performance claim that is not measured decays, so the manual release
+checklist below includes four measurements. They are deliberately crude:
+Chrome's task manager and its performance panel answer the question well
+enough, and nothing here justifies building a benchmark harness.
+
+* Dependencies
+
+- No runtime dependencies. No framework, no bundler, no polyfill, nothing
+  fetched at runtime.
+- No dev dependencies. Tests run with the Node test runner already present
+  in Node 18 and later. The only requirement on a contributor's machine is
+  Node itself.
+- Chrome APIs used: ~chrome.webNavigation~ for the one navigation event,
+  ~chrome.tabs~ for listing and removing, ~chrome.storage~ for sync and
+  session storage, ~chrome.scripting~ for banner injection,
+  ~chrome.notifications~ for the notification, ~chrome.runtime~ for
+  messaging, and ~chrome.action~ for the toolbar icon opening the options
+  page. No alarms, no idle detection, no periodic anything.
+- Publishing needs a Chrome Web Store developer account, a 128 pixel icon,
+  at least one 1280 by 800 screenshot, short and long descriptions, and a
+  publicly reachable privacy policy.
+
+** Manual work, not code
+
+Two deliverables cannot be written as code, and both block the store
+submission rather than the build. They belong in the task list as explicit
+manual tasks, with these acceptance criteria.
+
+*** Identity and artwork
+
+The upstream Unique Tabs listing is live and the Chrome Web Store rejects a
+near-identical one, so the artwork must be visibly DejaTab's own. Done
+means:
+
+1. A source file for the mark in a vector format, kept in the repository so
+   it can be re-exported at any size.
+2. Raster icons exported at 16, 32, 48 and 128 pixels, each legible at its
+   own size rather than the 128 shrunk down. The 16 pixel version is judged
+   in the tab strip, the 128 in the store listing.
+3. The mark sharing nothing with upstream's artwork: not its shape, not its
+   colours, not a recolouring of it.
+4. One line stating what the mark is meant to say, so a later redesign has
+   something to be judged against.
+5. All four sizes referenced from the manifest and visibly correct in
+   ~chrome://extensions~ and in the toolbar after a reload.
+
+*** Store listing and privacy policy
+
+Done means:
+
+1. A Chrome Web Store developer account registered and the one-time fee
+   paid.
+2. A privacy policy page in the repository, served through GitHub Pages at a
+   stable URL, stating plainly that no data is collected, nothing leaves the
+   browser and no page content is read.
+3. The all-sites permission justified in the words the listing requires: the
+   access places the prompt on a page and compares addresses, and nothing
+   reads the page.
+4. At least one 1280 by 800 screenshot of the options page, a short
+   description and a detailed description.
+5. The repository public before any of this is submitted, per the PRD's
+   release order.
+
+* Testing Strategy
+
+** Automated
+
+One suite over ~src/rules.js~, run with Node's test runner. The module
+takes a URL string and a rule object and returns a string, which makes
+every case a one-line assertion. Cases to cover:
+
+1. Each rule on its own: a pair that matches with the rule on and does not
+   match with it off, for all ten rules.
+2. Defaults as shipped: fragment and trailing slash and tracking
+   parameters ignored, everything else respected.
+3. Rule interactions: ~sameHost~ with a path rule also on, ~dropQuery~ with
+   the parameter rules also on.
+4. Tracking parameters: a parameter switched off in ~trackingParamsOff~
+   survives; a user parameter is removed; a parameter that merely starts
+   with ~utm~ but is not in the list survives.
+5. Parameter order: two addresses with the same pairs in a different order,
+   with the rule on and off; repeated parameter names, which must not be
+   collapsed.
+6. Path prefix: N greater than the number of segments present, N of 1
+   against a root path, a path with a trailing empty segment.
+7. Edge addresses: an address that will not parse, an explicit default port
+   against an implicit one, an upper-case host, an empty query marker with
+   nothing after it, an address whose path contains encoded characters.
+8. Host matching in ~settings.js~, which is pure enough to test the same
+   way: subdomain matches, the most specific entry winning, and a host that
+   merely ends in the same letters not matching.
+9. The tester's explanation: a pair that differs by one off rule reports
+   that rule, and a pair that no single rule explains reports the first
+   differing piece.
+10. Settings normalisation, which is pure in the same way: a stored timeout
+    outside the allowed range falls back to 30, a timeout of 0 survives as
+    meaning indefinite, and a malformed rules object falls back field by
+    field rather than wholesale.
+
+** Manual
+
+A checklist run in a real profile before each release, because none of this
+can be exercised without Chrome:
+
+1. Two tabs on the same article, one carrying tracking parameters: the
+   banner appears on the second, Yes closes the first, the notification
+   names it.
+2. No leaves both tabs open and asks again on the next navigation to that
+   page.
+3. Always closes and stops asking on that host, and a per-site entry
+   appears on the options page labelled as set by Always.
+4. Never closes nothing, adds an exclusion entry, and the host then
+   produces no prompts at all.
+5. A pinned tab is never closed. A loading tab is never closed.
+6. Duplicates in another window are found.
+7. Navigating to an internal page produces no banner.
+8. Navigating on the Chrome Web Store produces no banner and closes
+   nothing.
+9. The options page reflects an Always written while it was open.
+10. The address tester agrees with what the extension did in case 1.
+11. The cleanup sweep counts correctly, asks once, and closes only after
+    the user agrees.
+12. Settings survive a browser restart and appear on a second machine
+    signed into the same Chrome profile.
+13. The banner fades out after the configured timeout, closes nothing, and
+    the same page asks again on the next navigation to it.
+14. Hovering the banner holds it open, and moving the pointer away restarts
+    the timeout.
+15. A timeout of 0 leaves the banner on screen indefinitely.
+
+** Performance checks
+
+Run with a profile holding roughly two hundred tabs, since that is the user
+this extension exists for.
+
+1. Chrome's task manager, while reading a page and not navigating: no
+   DejaTab row at all, because the worker has been stopped. A row that
+   never goes away means something is keeping the worker alive.
+2. Chrome's performance panel recording a page load, with and without the
+   extension installed: no added scripting on the page's own thread, since
+   no extension code should run there.
+3. A navigation to a page with many duplicates open, with the worker's own
+   timing logged around the tab listing and key building: within the
+   five-millisecond target of the budget above.
+4. Navigating around a single-page application: no worker wakes at all,
+   confirming FR-34.
+
+* Open Questions
+
+1. The prompt surface and the permission it costs. Resolved 2026-09-27: the
+   banner stays and the PRD has been amended. FR-13 now grants access to all
+   sites for two uses, placing the prompt and comparing addresses, and keeps
+   the promise that no page content is read.
+2. Pages where a banner cannot be drawn. Resolved 2026-09-27: nothing closes
+   there, and no second prompt mechanism is built.
+3. Which tab survives a cleanup sweep. Resolved 2026-09-27: the tab the user
+   is looking at, otherwise the most recently accessed one.
+4. A settings object past the 8 KB sync limit. Resolved 2026-09-27: surface
+   the write failure on the options page and keep working from the in-memory
+   values, with no silent fallback to local storage.
+5. Whether an unanswered banner expires. Resolved 2026-09-27: it fades out
+   after a configurable timeout, 30 seconds by default, and that counts as
+   No. Hovering holds it open, and 0 means it waits indefinitely.
+6. The icon and wordmark. Resolved 2026-09-27: owned by the user and tracked
+   as the two manual tasks under Dependencies, with acceptance criteria
+   there. Neither blocks the code.
+
+One question is open in the PRD rather than here: whether ~rel=canonical~
+should ever be consulted. Nothing in this specification turns on the answer,
+since reading it would add an input to the matcher rather than change any
+component described above.

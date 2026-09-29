@@ -1,0 +1,415 @@
+/* DejaTab options page.
+   The light palette is the approved mockup's. The dark one is derived from it: the same hues,
+   inverted lightness, with every text colour kept at 4.5:1 or better against what sits behind it.
+   Fonts are a system stack on purpose. The mockup's IBM Plex would have to be fetched, and an
+   options page that fetches anything contradicts what this extension promises. */
+
+:root {
+  --bg: #F3F1EC;
+  --surface: #FFFFFF;
+  --line: #E2DFD7;
+  --line-soft: #EDEBE4;
+  --text: #1B1B1A;
+  --dim: #5A584F;
+  --muted: #6B6961;
+  --accent: #1E63CE;
+  --accent-ink: #FFFFFF;
+  --accent-edge: transparent;
+  --accent-strong: #17509F;
+  --accent-text-strong: #17509F;
+  --accent-text: #1E63CE;
+  --on-bg: #C9DCF8;
+  --on-text: #123A78;
+  --off-bg: #F6EFE6;
+  --off-text: #6B4A16;
+  --chip-bg: #F2F1EC;
+  --chip-text: #3D3D38;
+  --code-bg: #F2F1EC;
+  --code-line: #E2DFD7;
+  --code-text: #3D3D38;
+  --field-bg: #FFFFFF;
+  --field-line: #CFCCC4;
+  --quiet-hover: #F6F5F1;
+  --note-bg: #FAF6F0;
+  --note-line: #EADFCF;
+  --note-text: #4A4437;
+  --warn: #8A4F13;
+  --switch-off: #8F8C83;
+  --shadow: rgba(0, 0, 0, 0.35);
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #191918;
+    --surface: #232321;
+    --line: #35342E;
+    --line-soft: #2D2D29;
+    --text: #EDEBE4;
+    --dim: #C3C0B7;
+    --muted: #A8A59C;
+    --accent: #1E63CE;
+    --accent-ink: #FFFFFF;
+    --accent-edge: #4F8BEA;
+    --accent-strong: #3271DB;
+    --accent-text-strong: #A8CBFA;
+    --accent-text: #7FB0F5;
+    --on-bg: #1D4270;
+    --on-text: #A8CDF7;
+    --off-bg: #332814;
+    --off-text: #E8C89A;
+    --chip-bg: #2E2E2A;
+    --chip-text: #D6D3CA;
+    --code-bg: #2B2B28;
+    --code-line: #3A3A34;
+    --code-text: #D6D3CA;
+    --field-bg: #1F1F1D;
+    --field-line: #4A4840;
+    --quiet-hover: #2C2C29;
+    --note-bg: #262219;
+    --note-line: #3D3527;
+    --note-text: #DCD3C2;
+    --warn: #E0A263;
+    --switch-off: #949084;
+    --shadow: rgba(0, 0, 0, 0.6);
+  }
+}
+
+* { box-sizing: border-box; }
+
+:root { color-scheme: light dark; }
+
+/* An author display rule outranks the UA stylesheet's [hidden], and several cards below set
+   display: flex, so hidden has to be stated here or an empty box would show. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 600; }
+h1 { font-size: 23px; letter-spacing: -0.2px; }
+h2 { font-size: 16px; }
+h3 { font-size: 14px; }
+p { margin: 0; }
+
+/* Header */
+
+.page-head {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 30px 24px 24px;
+}
+
+.head-inner {
+  max-width: 920px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+/* The artwork brings its own rounded plate, so the page paints no tile behind it. The radius is
+   the artwork's own corner, 22 of its 128 pixels, at this box's size: anything larger would shave
+   the corners off the mark. */
+.mark {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.head-text { flex-grow: 1; }
+.subtitle { margin-top: 5px; font-size: 13px; color: var(--dim); }
+.version { font-size: 12px; color: var(--muted); padding-top: 6px; white-space: nowrap; }
+
+/* Page frame */
+
+main {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 30px 24px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.sec { display: flex; flex-direction: column; gap: 12px; }
+.sec-head p { margin-top: 4px; font-size: 13px; color: var(--dim); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.grow { flex-grow: 1; }
+.hint { font-size: 12px; color: var(--muted); }
+.foot { font-size: 12px; color: var(--muted); text-align: center; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Controls */
+
+.fld {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--field-bg);
+  border: 1px solid var(--field-line);
+  border-radius: 6px;
+  padding: 9px 11px;
+}
+
+.fld.mono { font-family: var(--mono); font-size: 12px; }
+.fld::placeholder { color: var(--muted); }
+select.fld { padding: 7px 8px; }
+
+.btn {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  padding: 10px 16px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent-edge); }
+.btn-primary:hover { background: var(--accent-strong); }
+.btn-quiet { background: var(--surface); color: var(--text); border-color: var(--field-line); }
+.btn-quiet:hover { background: var(--quiet-hover); }
+
+.btn-link {
+  font-family: var(--sans);
+  font-size: 13px;
+  background: none;
+  border: none;
+  color: var(--accent-text);
+  padding: 6px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.btn-link:hover { color: var(--accent-text-strong); text-decoration: underline; }
+
+/* The rule switch: a checkbox drawn as a track and a knob, so it is still a checkbox to the
+   keyboard, to a screen reader and to the form. */
+.sw {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 38px;
+  height: 22px;
+  flex: none;
+  margin: 2px 0 0;
+  border-radius: 11px;
+  background: var(--switch-off);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sw::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-ink);
+  box-shadow: 0 1px 2px var(--shadow);
+  transition: left 0.15s;
+}
+
+.sw:checked { background: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.sw:checked::after { left: 19px; }
+
+.cb {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.sw:focus-visible,
+.cb:focus-visible,
+.fld:focus-visible,
+.btn:focus-visible,
+.btn-link:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
+/* An address, or a piece of one, shown as data rather than prose. */
+.u {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--code-text);
+  word-break: break-all;
+}
+
+/* Matching rules */
+
+.rules { padding: 4px 20px; }
+
+.rule {
+  display: flex;
+  gap: 14px;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.rule:last-child { border-bottom: none; }
+.rule-body { flex-grow: 1; min-width: 0; }
+.rule-name { display: block; font-size: 14px; font-weight: 500; }
+.rule-name label { cursor: pointer; }
+.rule-example { display: block; margin-top: 6px; }
+.rule-example .eq { color: var(--muted); font-size: 13px; }
+.rule-note { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.rule-desc { display: block; margin-top: 6px; font-size: 13px; color: var(--dim); }
+.rule-body .fld { margin-top: 8px; width: min(320px, 100%); }
+.rule-name .fld { width: 56px; margin: 0 2px; padding: 3px 6px; font-size: 13px; }
+
+/* Tracking parameters */
+
+.tracking {
+  padding: 18px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px 16px;
+}
+
+.check { display: flex; align-items: center; gap: 9px; }
+.check span { font-size: 13px; }
+.check .mono { font-family: var(--mono); font-size: 12px; }
+.check label { cursor: pointer; }
+
+/* Lists */
+
+.list-card { padding: 6px 20px 16px; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.row .host { font-family: var(--mono); font-size: 13px; flex-grow: 1; word-break: break-all; }
+.origin { font-size: 12px; color: var(--muted); }
+.empty { padding: 12px 0; font-size: 13px; color: var(--muted); }
+
+.add-row { display: flex; align-items: center; gap: 10px; padding-top: 14px; flex-wrap: wrap; }
+.add-row label { font-size: 13px; color: var(--dim); }
+.list-card .add-row { padding-top: 14px; }
+
+/* Per-site entries */
+
+.sites { display: flex; flex-direction: column; gap: 12px; }
+.sites:empty { display: none; }
+.site { padding: 16px 20px; display: flex; gap: 16px; }
+.site-main { flex-grow: 1; min-width: 0; }
+.site-host { font-family: var(--mono); font-size: 14px; font-weight: 500; word-break: break-all; }
+.chips { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+
+.chip {
+  font-size: 12px;
+  border-radius: 20px;
+  padding: 4px 11px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+}
+
+.chip-on { background: var(--on-bg); color: var(--on-text); }
+.chip-off { background: var(--off-bg); color: var(--off-text); }
+.site-auto { margin-top: 12px; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.site-actions { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; flex: none; }
+
+/* The per-site editor */
+
+.editor { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.editor-title { font-size: 14px; }
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 14px;
+  align-items: center;
+}
+
+.editor-grid label { font-size: 13px; }
+.editor-grid select { min-width: 110px; }
+.editor-actions { display: flex; gap: 10px; }
+.field-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.field-row > label { font-size: 13px; color: var(--dim); min-width: 76px; }
+
+/* Prompt timeout */
+
+.timeout-row { padding: 18px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.timeout-row label, .timeout-row span { font-size: 13px; }
+.timeout-row .fld { width: 82px; }
+
+/* Address tester */
+
+.tester { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.tester-go { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.verdict { display: flex; align-items: center; gap: 9px; font-size: 13px; min-height: 18px; }
+.verdict strong { font-weight: 500; }
+.verdict .said { color: var(--dim); }
+.verdict-mark { display: flex; flex: none; }
+.verdict-mark.same { color: var(--accent-text); }
+.verdict-mark.diff { color: var(--warn); }
+
+.keys {
+  background: var(--note-bg);
+  border: 1px solid var(--note-line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--note-text);
+}
+
+/* Actions and confirmations */
+
+.actions { padding: 18px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.actions p { margin-top: 4px; font-size: 13px; color: var(--dim); }
+.confirm { padding: 16px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.confirm-text { flex-grow: 1; font-size: 13px; }
+
+/* The one place a failure, a rejected entry or a finished sweep is reported. Fixed to the bottom
+   so a message about a rule at the top of the page is not written off the screen. */
+.status {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  max-width: min(600px, calc(100% - 32px));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px var(--shadow);
+  padding: 11px 15px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.status.bad { border-color: var(--warn); color: var(--text); }

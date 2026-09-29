@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DejaTab settings</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <!-- Every list, rule row and verdict below is built by options.js. The markup here is the
+         page's fixed frame: the headings, the explanatory sentences, and the empty containers. -->
+    <header class="page-head">
+      <div class="head-inner">
+        <span class="mark" aria-hidden="true">
+          <!-- The extension's own artwork, at its largest export so it stays crisp on a high-DPI
+               display. Decorative: the heading beside it already says the name. -->
+          <img src="../icons/icon128.png" alt="" width="40" height="40">
+        </span>
+        <div class="head-text">
+          <h1>DejaTab</h1>
+          <p class="subtitle">One tab per page, and you decide what counts as a page. Changes take effect at
+            once, no restart.</p>
+        </div>
+        <span class="version" id="version"></span>
+      </div>
+    </header>
+
+    <main>
+      <section class="sec">
+        <div class="sec-head">
+          <h2>Matching rules</h2>
+          <p>Two tabs are the same page when every rule you switch on, applied to both addresses, leaves them
+            equal.</p>
+        </div>
+        <div class="card rules" id="rules"></div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-head">
+          <h2>Tracking parameters</h2>
+          <p>Removed from an address before it is compared, while the rule above is on.</p>
+        </div>
+        <div class="card tracking" id="tracking"></div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-head">
+          <h2>Excluded sites</h2>
+          <p>DejaTab ignores these entirely: it never closes their tabs and never asks about them. An entry
+            covers the site and everything under it. Answering Never in the prompt adds a site here.</p>
+        </div>
+        <div class="card list-card">
+          <div id="excluded"></div>
+          <div class="add-row">
+            <label for="add-excluded">Add a site</label>
+            <input type="text" id="add-excluded" class="fld mono grow" placeholder="example.com">
+            <button type="button" class="btn btn-quiet" id="add-excluded-go">Add</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-head">
+          <h2>Per-site rules</h2>
+          <p>A site starts from the rules above and changes only what it names. The most specific entry wins,
+            so mail.example.com beats example.com.</p>
+        </div>
+        <div id="sites" class="sites"></div>
+        <div id="site-editor" hidden></div>
+        <div class="add-row">
+          <button type="button" class="btn btn-quiet" id="add-site">Add a site</button>
+          <span class="hint">Answering Always in the prompt adds one for you.</span>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-head">
+          <h2>When DejaTab asks</h2>
+          <p>The banner waits this long for an answer, then fades out and closes nothing. The same page asks
+            again next time you go there.</p>
+        </div>
+        <div class="card timeout-row">
+          <label for="timeout">Give up after</label>
+          <input type="number" id="timeout" class="fld" min="0" max="600" step="1">
+          <span>seconds</span>
+          <span class="grow"></span>
+          <span class="hint">0 waits indefinitely. Hovering the banner holds it open.</span>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-head">
+          <h2>Try two addresses</h2>
+          <p>See what your rules say about a pair of addresses without touching your real tabs. The rules of
+            the first address's site are the ones used, exactly as when a tab lands there.</p>
+        </div>
+        <form class="card tester" id="tester">
+          <div class="field-row">
+            <label for="test-a">Address A</label>
+            <input type="text" id="test-a" class="fld mono grow"
+                   placeholder="https://www.example.com/article?utm_source=newsletter#top">
+          </div>
+          <div class="field-row">
+            <label for="test-b">Address B</label>
+            <input type="text" id="test-b" class="fld mono grow" placeholder="https://example.com/article/">
+          </div>
+          <div class="tester-go">
+            <button type="submit" class="btn btn-primary">Compare</button>
+            <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
+          </div>
+          <p class="keys" id="keys" hidden></p>
+        </form>
+      </section>
+
+      <section class="card actions">
+        <div class="grow">
+          <h3>Tabs already open</h3>
+          <p>Apply these rules to every window at once. DejaTab asks before it closes anything.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="cleanup">Clean up open tabs now</button>
+        <button type="button" class="btn btn-quiet" id="reset">Reset to defaults</button>
+      </section>
+      <div class="card confirm" id="confirm" hidden></div>
+
+      <p class="foot">Settings follow your Chrome profile. Nothing leaves the browser: DejaTab reads no page
+        content and contacts no server.</p>
+    </main>
+
+    <p class="status" id="status" role="status" aria-live="polite" hidden></p>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,562 @@
+#+STARTUP: overview
+#+TITLE: DejaTab - Manual Check List
+#+STARTUP: showall
+#+PRD: [[file:2026-09-17-dejatab-prd.org][dejatab - PRD]]
+#+TSD: [[file:2026-09-23-dejatab-tsd.org][dejatab - TSD]]
+#+TASKS: [[file:2026-09-27-dejatab-tasks.org][dejatab - Task List]]
+
+* What this is
+
+Everything in DejaTab that only Chrome can settle. The automated suite covers
+the URL rules and the settings logic; nothing in it can prove that a banner
+renders on a real site, that Chrome refuses to inject into the Web Store, or
+that the extension is absent from the task manager while the user reads.
+
+Each item says what to set up, what to do, what you should see, and which
+requirement or task it proves. Work through them in order: the later ones
+assume the earlier ones passed.
+
+These items close sub-tasks 1.7, 5.2 and 5.8, and they are the content of
+7.7, 7.8 and 7.9 in [[file:2026-09-27-dejatab-tasks.org][the task list]].
+
+* Setup, once
+
+1. Open ~chrome://extensions~ and turn on Developer mode, top right.
+2. Click "Load unpacked" and pick the repository root, the directory holding
+   ~manifest.json~.
+3. After editing any file, press the reload arrow on the DejaTab card. After
+   editing ~manifest.json~, remove the extension and load it again.
+4. Open DejaTab's settings by clicking its toolbar icon.
+
+Unless an item says otherwise, leave the rules at their shipped values and
+both lists empty. The quickest way back to that state is "Reset to defaults"
+at the bottom of the settings page.
+
+* Install and permissions
+
+** 1. The extension loads clean
+
+On ~chrome://extensions~ the DejaTab card shows no "Errors" button, and
+clicking "Service worker" opens a console with no red entries. Click the
+toolbar icon: the settings page opens in a tab and every section renders.
+
+Proves task 1.7 and FR-22.
+
+** 2. The permission warning is the one the PRD expects
+
+On the card, open "Details" and read the site-access text. It must say
+DejaTab can read and change your data on all sites, and nothing about
+browsing history, downloads or anything else.
+
+Proves task 1.7, and the FR-13 privacy story the store listing repeats.
+
+* The four answers
+
+** 3. A tracking parameter does not earn a second tab
+
+Open an article. In a new tab open the same article with ~?utm_source=test~
+appended. A dark bar appears at the top of the second tab reading "DejaTab
+found 1 other tab on this page. Close it?", with Yes, No, Always and Never,
+the shortened address beside it, and Yes already focused. Click Yes: the
+first tab closes, the bar disappears, and a Chrome notification says it
+closed 1 duplicate tab and names the page.
+
+Proves FR-6, FR-7, FR-12 and R5.
+
+** 4. No keeps everything
+
+Repeat 3 and click No. Both tabs stay open, the bar disappears, no setting
+changes. Reload the second tab: the bar appears again.
+
+Proves FR-7.
+
+** 5. Dismissing without choosing means No
+
+Repeat 3 and press Escape. The bar disappears and nothing closes.
+
+Proves FR-9's dismissal clause.
+
+** 6. Always stops the asking
+
+Repeat 3 and click Always. The duplicate closes and the notification names
+it. In settings, Per-site rules now holds an entry for that host with "Close
+duplicates without asking" ticked, labelled "set by Always" with today's
+date. Make another duplicate on that host: no bar at all, the duplicate
+closes by itself, and only the notification tells you.
+
+Proves task 5.8, FR-7, FR-8 and FR-12.
+
+** 7. Never makes the site inert
+
+On a different host, trigger the bar and click Never. Nothing closes. In
+settings, Excluded sites lists that host as "added by Never" with today's
+date. Make two more duplicates there: no bar, no closing, nothing at all.
+
+Proves FR-7, FR-8 and FR-15.
+
+** 8. Never disarms a standing Always
+
+Take the host from 6, which has Always set. Trigger a duplicate on a
+subdomain of it and answer Never there. The per-site entry for the parent
+host keeps its rule overrides, its origin label and its date, but "Close
+duplicates without asking" is now unticked.
+
+Proves FR-8's clause that a Never leaves no armed Always behind.
+
+** 9. Removing an exclusion asks again rather than resuming silently
+
+Remove the Never entry from 7 with its Remove link, then make a duplicate on
+that host. The bar returns, because the exclusion is gone and no Always was
+left armed.
+
+Proves FR-8 and FR-21.
+
+* What must never be closed
+
+** 10. A pinned tab survives
+
+Open a page, right-click its tab, Pin. Open the same page in a new tab. No
+bar appears, because a pinned tab is not a candidate and nothing else
+matches.
+
+Proves FR-4.
+
+** 11. A loading tab survives
+
+Open a very slow page and, while it is still loading, open the same address
+in another tab. Nothing closes.
+
+Proves FR-4.
+
+** 12. A tab pinned mid-close survives, and the count tells the truth
+
+Open the same page in four tabs. In the fourth, wait for the bar, click Yes,
+and immediately pin one of the other three. The pinned tab is still open
+afterwards, and the notification names 2 rather than 3.
+
+Proves FR-4 and FR-11 together with the close-time re-check.
+
+** 13. A tab that moved on survives
+
+Open the same page in three tabs. In the third, wait for the bar, switch to
+the first tab and navigate it somewhere else, come back and click Yes. Only
+the tab still showing the page closes, and the notification says 1.
+
+Proves that a plan made before the answer can never cost a tab the user has
+since moved.
+
+** 14. Internal pages are untouched
+
+Open ~chrome://settings~ in two tabs, then ~chrome://extensions~ in two
+more. No bar anywhere, nothing closes.
+
+Proves FR-5.
+
+** 15. Pages Chrome refuses to inject into close nothing
+
+Open the same Chrome Web Store page in two tabs. Repeat with a PDF in
+Chrome's own viewer, and with a ~file://~ page. In all three: no bar, and
+nothing closes. A question that could not be asked must never become a
+close.
+
+Proves task 5.2 and the TSD's Error Handling row for injection failure.
+
+** 16. An excluded site stays excluded when spelled with a trailing dot
+
+Add a host you can navigate to Excluded sites. Open it normally in one tab.
+In a second tab navigate to the fully qualified spelling, with a dot after
+the last label: ~https://example.com./~ rather than ~https://example.com/~.
+No bar, nothing closes.
+
+This is the shape of a real bug. The matcher already stripped that dot when
+it built the key, so the two spellings matched as one page, while the
+exclusion lookup kept the dot and missed its own entry: a prompt and a close
+on a site the user had told DejaTab to ignore.
+
+Proves FR-15 and FR-16 against the fully qualified spelling.
+
+** 17. An upper-case host resolves the same entries as its plain form
+
+Add a per-site entry for a host, then navigate to that host with some
+letters capitalised. The entry's rules must apply, and if its
+close-without-asking box is ticked the duplicate must close with no prompt.
+
+Proves FR-19 and FR-20, and that the worker and the settings page normalise
+a host the same way.
+
+** 18. A raw XML page closes nothing
+
+Open a URL serving ~text/xml~ with no stylesheet, in two tabs. No bar,
+nothing closes: the banner cannot render in such a document, so the answer
+is a silent No.
+
+Proves the same Error Handling rule as 15.
+
+* Across windows
+
+** 19. Another window's duplicates are found
+
+Open a page, move its tab to a new window, then open the same page in the
+original window. The bar appears, and Yes closes the tab in the other
+window.
+
+Proves FR-3.
+
+* The banner on hostile and awkward pages
+
+** 20. A transformed body does not break it
+
+Find a site whose body gets a transform or a filter: a slide-in drawer menu
+and a blur-behind-modal both do this. Open the drawer or the modal, then
+trigger a duplicate on that site. The bar must still appear and Yes must
+still close the duplicates. The bar may sit slightly inside the page's own
+box rather than flush to the window edge, which is expected and correct.
+
+This is the case a strict geometry check broke, turning every answer into a
+silent No. It is the most important item in this list.
+
+** 21. A filter or contain on the root element
+
+As 20, but with the property on ~html~ rather than ~body~, including a page
+in fullscreen. Yes must still close.
+
+** 22. The bar is legible and on top anywhere
+
+Trigger it on a light site, a dark site, a site with its own fixed cookie
+banner, and a site with a full-screen overlay. DejaTab's bar sits above
+everything, with its own dark background and light text, nothing of the page
+bleeding through and nothing of the page restyled.
+
+Proves tasks 5.3 and 5.4.
+
+** 23. No site can style, read or click it
+
+With the bar up, open DevTools and evaluate
+~document.getElementById("dejatab-banner-host").shadowRoot~. It must return
+null, because the root is closed.
+
+Proves task 5.3 and the TSD's Security section.
+
+* The timeout
+
+** 24. It gives up on its own and closes nothing
+
+Leave the timeout at its shipped 30 seconds. Trigger the bar and do not
+touch it. After 30 seconds it fades out and vanishes, and nothing closes.
+Reload that tab: the bar returns.
+
+Proves FR-9.
+
+** 25. Hovering holds it open
+
+Trigger the bar, then keep the pointer over it for a minute: it stays. Move
+the pointer away and time it: it fades 30 seconds later, not sooner, because
+leaving restarts the full timeout rather than the remainder.
+
+Proves FR-9.
+
+** 26. Zero waits indefinitely
+
+Set the timeout to 0, which the page explains as waiting indefinitely.
+Trigger the bar and leave it ten minutes or more. It is still there, still
+answerable, and Yes still closes the duplicates.
+
+Proves FR-9.
+
+** 27. A question left at timeout 0 does not gag the extension
+
+With the timeout still 0, leave a bar unanswered and wait an hour. Navigate
+a different tab to a page that has a duplicate open: that tab must be asked.
+Go back to the first bar and click Yes: its duplicates must still close if
+they still show that page.
+
+Proves FR-10 together with the clause that lets a zero-timeout record
+outlive the one-hour cutoff every other question gets.
+
+** 28. Only one question exists at a time
+
+With a bar open in one tab, navigate another tab to a page that has
+duplicates. No second bar appears. Answer the first, then navigate that
+other tab to the same page again: now it asks.
+
+Proves FR-10.
+
+** 29. Navigating away from a bar does not gag the extension either
+
+Trigger a bar, then navigate that same tab somewhere else without answering.
+Now trigger a duplicate in any tab: it must be asked, rather than staying
+silent until the abandoned question expires.
+
+Proves FR-10 and the dead-question sweep.
+
+* The settings page
+
+** 30. An Always answered in a banner appears on an open settings page
+
+Open DejaTab's settings in one tab and leave it visible. In another window,
+trigger a bar and answer Always. The per-site entry appears on the settings
+page without reloading it.
+
+Proves task 6.10.
+
+** 31. An Always answered while the settings page is still loading also appears
+
+Trigger a bar in one window, then open DejaTab's settings and answer Always
+within the first two seconds, while the page is still drawing. The entry is
+there when the page settles. The page registers its storage listener before
+its first read for exactly this gap.
+
+Proves task 6.10.
+
+** 32. The tester agrees with what the extension did
+
+Paste the two addresses from 3 into "Try two addresses", A first. It says
+"The same page" and shows the shared key. Untick ~utm_source~ in the
+tracking parameter list and compare again: it says the parameters differ and
+names the tracking rule as the switch that would match them.
+
+Proves FR-24.
+
+** 33. The tester names an excluded site instead of comparing
+
+Add a host to Excluded sites, then paste two addresses on that host into the
+tester. No same-or-different verdict: a line saying nothing would happen
+because that site is excluded, naming the site, and telling you to remove it
+from the list to test rules against it.
+
+Proves FR-15 and FR-16 as the tester reports them.
+
+** 34. The tester rejects an unreadable address by side
+
+Type ~not a url~ in A and a real address in B. It names address A
+specifically and tells you to include the scheme.
+
+Proves FR-24 and the Error Handling row for an address that will not parse.
+
+** 35. A per-site entry overrides only what it names
+
+Add a per-site entry, set one rule to On and leave the rest on Inherit. Its
+summary shows one chip for that rule and one saying everything else is
+inherited. Change the matching global rule: the per-site value must not
+follow it, while a rule left on Inherit must.
+
+Proves FR-17 and FR-18.
+
+** 36. The most specific entry wins
+
+Add entries for ~example.com~ and ~mail.example.com~ with different rules,
+then navigate to ~mail.example.com~. The subdomain entry's rules decide,
+with no blending of the two.
+
+Proves FR-19 and FR-20.
+
+* The sweep
+
+** 37. It counts, asks once, and closes only on agreement
+
+Open a dozen tabs with several duplicate sets among them, then click "Clean
+up open tabs now". One question appears naming both totals, for example
+"Close 7 tabs across 3 pages?", offering a confirm and a Cancel and nothing
+else: there is no Always or Never here, because a sweep spans many hosts and
+neither answer would mean anything. Press Cancel: nothing closes. Click the
+button again and confirm: the tabs close, the page reports how many, and one
+notification follows.
+
+Proves task 6.9 and FR-25.
+
+** 38. It pairs www with the apex
+
+Switch on "Ignore a leading www." Open ~https://www.example.com/~ and
+~https://example.com/~ in two tabs. Run the sweep: it must count 1 tab
+across 1 page.
+
+Bucketing tabs by hostname before comparing used to hide exactly this pair,
+so this is the check that the sweep applies the same rules as the rest of the
+extension.
+
+Proves FR-25.
+
+** 39. It keeps the tab you are looking at
+
+With duplicates open, start the sweep from the settings page: that page is
+the active tab and is in no duplicate group, so the most recently accessed
+tab in each group survives. Now put the settings page in a second window,
+focus a duplicate in the first window, and sweep again: the focused duplicate
+must be the one that survives.
+
+Proves the TSD's resolution of its third open question.
+
+** 40. A stale count refuses to close anything
+
+Run the sweep to get a count. Before confirming, close one of the tabs it
+counted and reload the settings page. Now confirm: you get a message that the
+count has expired and to count the duplicates again, and nothing closes. The
+token behind the count is single use, so a confirmation can only ever close
+the set the user saw a number for.
+
+* Settings, storage and sync
+
+** 41. Every change takes effect with no restart
+
+Toggle a rule, then immediately create a duplicate that only that rule
+matches. The new rule decides, with nothing reloaded and no browser restart.
+
+Proves FR-26.
+
+** 42. Reset clears the recorded hosts too
+
+With entries in both lists, click "Reset to defaults" and confirm. Every rule
+goes back to its shipped value, the timeout back to 30 seconds, and both
+lists empty, including every host that Always and Never recorded.
+
+Proves FR-27.
+
+** 43. A write that cannot be saved says so
+
+Fill the sync quota by pasting a very long list of names into "Parameters to
+drop", or answer Always with sync unavailable. On the settings page you get a
+plain message naming the cause and saying the change is in effect until you
+close Chrome but was not stored. For an Always or Never answered in a banner,
+where the bar has already removed itself and the settings page is probably
+closed, you get a notification titled "DejaTab could not save that setting"
+instead.
+
+Proves the Error Handling row for a failed write.
+
+** 44. Settings survive a restart and reach a second machine
+
+Configure several rules and both lists, quit Chrome and reopen it:
+everything as you left it. Then sign in to the same Chrome profile on a
+second machine with the extension installed and open its settings: the same
+rules and the same lists.
+
+Proves FR-28.
+
+** 45. A write from another machine appears live
+
+With the settings page open on machine A, change a rule on machine B.
+Machine A's page updates itself with no reload. This is the only check that
+exercises the page's storage listener with a write that neither this page nor
+this worker made.
+
+Proves FR-26 and task 6.10.
+
+* Performance
+
+Three of the four measurements task 7.9 asks for are honestly answerable with
+Chrome's own tools. The fourth, comparing page-load timings against a profile
+without the extension, is not, and 47 says why rather than inventing a
+procedure for it.
+
+** Getting to roughly two hundred tabs
+
+Do not use ~chrome://~ or ~data:~ tabs: the extension rejects those by scheme
+before it builds a key, so a profile full of them measures nothing. Serve two
+hundred trivial local pages over http instead, which are real candidates and
+do get keyed:
+
+#+BEGIN_SRC sh
+mkdir -p /tmp/dejatab-load && cd /tmp/dejatab-load
+for i in $(seq 1 200); do
+  printf '<!doctype html><title>p%s</title><p>%s\n' "$i" "$i" > "p$i.html"
+done
+python3 -m http.server 8000 &
+google-chrome $(for i in $(seq 1 200); do
+  printf 'http://localhost:8000/p%s.html ' "$i"
+done)
+#+END_SRC
+
+Every page is a few bytes, so all two hundred finish loading, which matters
+because a tab still loading is filtered out before the extension counts it and
+a profile of half-loaded tabs understates the work. Make about twenty of them
+duplicates by repeating some numbers in that last command. Kill the server and
+the directory afterwards.
+
+** 46. Nothing runs while you read
+
+Open Chrome's Task Manager: Shift+Esc on Windows and Linux, or the Chrome
+menu, More tools, Task manager on any platform, which is the only route on
+macOS. Navigate somewhere so the extension wakes, and watch for a row reading
+"Service worker: DejaTab". It should appear for a moment and disappear within
+about thirty seconds. Now read a page for a full minute without navigating:
+there must be no DejaTab row at all. A row that never goes away means
+something is keeping the worker alive, which is the failure this check exists
+to catch.
+
+Proves FR-32 and the PRD's fourth goal.
+
+** 47. Nothing runs on the page's own thread
+
+Open DevTools on an ordinary page, go to the Performance panel, and record a
+reload with the extension loaded. Search the main thread's flame chart for
+anything attributable to DejaTab: a content script appears there by name.
+There must be nothing, because no content script is declared and
+~manifest.json~ has no ~content_scripts~ key at all. Repeat with the
+extension disabled to confirm the two recordings look the same in shape.
+
+The honest limit, and the reason the PRD's fifth success metric is now
+written as presence rather than timings: this is a presence-or-absence check,
+not a timing comparison. Run-to-run variance in a page load is far larger
+than any effect an extension that declares no content script could have, so
+two recordings will differ by tens of milliseconds either way and the
+difference will mean nothing. The absence of a DejaTab entry on the page's
+thread is the real evidence.
+
+Proves FR-31 and FR-33 as far as they can be proved.
+
+** 48. A navigation stays inside the five-millisecond budget
+
+There is no benchmark harness and none is wanted, so this needs two temporary
+lines in the worker. In ~handleNavigation~, capture ~performance.now()~
+immediately before the candidate listing and log the delta immediately after
+the duplicate selection.
+
+Reload the extension, then open the worker's console: ~chrome://extensions~,
+Details on the DejaTab card, then Inspect views: service worker. With two
+hundred tabs open, navigate to a page that has many duplicates among them and
+read the number. It must be under five milliseconds. Navigate a dozen times
+and take the worst reading, not the best. Note the first navigation after the
+worker has been stopped separately, because it also pays the worker's own
+startup cost, and letting that hide inside an average is how a real
+regression stays invisible.
+
+Those two lines are instrumentation, not a change to keep. Remove them before
+anything is committed and re-run ~node --test~ to confirm the file is clean.
+The extension ships with no logging on the navigation path at all: a console
+line per navigation is itself work the budget exists to exclude, so leaving
+the instrument in would quietly spend the thing being measured. The only
+~console~ calls that stay are on failure paths that run once and rarely: a tab
+listing that failed, a notification that could not be shown, a banner
+injection Chrome refused.
+
+Proves the TSD's performance budget.
+
+** 49. A single-page application wakes nothing
+
+On ~chrome://extensions~, wait until the DejaTab card reads "service worker
+(inactive)", about thirty seconds after the last event. Open the Task Manager
+as in 46 and keep it visible. Now open a single-page application, Gmail or any
+app that changes its address bar without loading a page, and move between its
+views for a full minute. No DejaTab row may appear at any point, and the card
+must still read inactive. Trust the row rather than the card's text: the
+inactive label does not always refresh on its own, while the Task Manager is
+live.
+
+This is the check that the navigation event was chosen correctly, since the
+event the worker listens for does not fire for an address a page changes by
+itself.
+
+Proves FR-34.
+
+* One question for Chrome itself
+
+** 50. Does Chrome's URL parser keep a host's trailing root dot?
+
+In DevTools on any page, evaluate ~new URL("https://example.com./a").hostname~.
+Node 25 returns ~"example.com."~, which is why both modules strip that dot. If
+Chrome returns ~"example.com"~ instead, the stripping stays and is harmless,
+but the comment in the settings module asserting that Chrome keeps the dot
+overstates the case and should be reworded.
+
+Item 16 is the behavioural half of this and matters whichever way the answer
+goes. This item is only about whether that comment is true.

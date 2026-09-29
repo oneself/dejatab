@@ -1,0 +1,331 @@
+#+STARTUP: overview
+#+TITLE: DejaTab - Product Requirements Document
+#+STARTUP: showall
+
+* Introduction/Overview
+
+DejaTab is a Chrome extension that closes earlier tabs showing the same page
+as the tab the user just navigated. It is a rewrite of the MIT-licensed
+Unique Tabs extension (github.com/joeyAghion/unique_tabs), which decides
+"same page" with one fixed rule: exact URL equality after stripping the
+~#fragment~.
+
+That rule misses the duplicates people actually accumulate. The same article
+arrives a second time carrying ~?utm_source=newsletter~. A link points at
+~https://example.com/docs~ while the open tab sits on
+~https://example.com/docs/~. A webmail tab is reopened with a different
+session parameter. In each case the user has two tabs of one page and the
+extension sees two different pages.
+
+DejaTab keeps the original closing behavior and hands the definition of
+"same page" to the user: a set of rules that can be set globally and
+overridden per site.
+
+* Goals
+
+1. One tab per page, where the user defines what counts as a page.
+2. Deduplicate across every open window, not only the window in front.
+3. Lose no work: no tab closes until the user says so, and a user who is
+   tired of being asked can say so once per site instead of turning the
+   extension off.
+4. Cost nothing to run. The extension must not slow a page down, must use no
+   CPU while the user is not navigating, and must not be the reason anyone
+   looks at Chrome's task manager.
+5. Let a user see what a rule does before it closes anything.
+6. Ship publicly: a public GitHub repository and a Chrome Web Store listing.
+
+* User Stories
+
+1. As someone who keeps 40 tabs open, I want a link I open from a newsletter
+   to be recognized as the article already in my tab strip, so the tracking
+   parameters on it do not earn it a second tab.
+2. As someone who reads documentation, I want ~/guide~ and ~/guide/~ treated
+   as one page, so a trailing slash does not split my tabs.
+3. As a webmail user, I want to declare that any two tabs on my mail host are
+   the same page, so I never end up with three inboxes open.
+4. As a developer, I want to exclude ~localhost~ from the extension, so two
+   tabs on the same local port stay open while I compare them.
+5. As a user whose rules are too aggressive, I want to be asked before
+   anything closes, so a wrong rule costs me nothing but a click.
+6. As someone who trusts the rules on a site I use constantly, I want to
+   answer once and never be asked about that site again, so the prompt does
+   not become the thing I dismiss all day.
+7. As a user configuring the extension, I want to paste two URLs and be told
+   whether my current rules call them the same page, so I can tune a rule
+   without experimenting on my real tabs.
+8. As a user of several machines, I want my rules to follow my Chrome
+   profile, so I configure them once.
+9. As someone who just tightened a rule, I want to apply it to the tabs I
+   already have open, so the cleanup is not postponed until I next navigate.
+
+* Functional Requirements
+
+** Detection and closing
+
+- FR-1. The extension acts when a tab finishes navigating in its top-level
+  frame. Navigation inside an embedded frame never triggers it.
+- FR-2. The tab that just navigated is the survivor. Every earlier tab that
+  matches it is a duplicate and is closed. The user's view never jumps to a
+  different tab.
+- FR-3. Candidate duplicates are drawn from every open window of the current
+  Chrome profile.
+- FR-4. A tab is never closed if it is pinned, if it is still loading, or if
+  it is the tab that just navigated.
+- FR-5. Browser-internal pages never trigger the extension and are never
+  closed: ~chrome://~, ~chrome-extension://~, ~devtools://~, ~view-source:~,
+  ~about:~, and the new tab page.
+- FR-6. The extension asks before closing anything. The duplicate tabs stay
+  open until the user answers. The prompt names how many tabs match and which
+  page they show, and offers four answers: Yes, No, Always and Never.
+- FR-7. The four answers mean:
+  - Yes closes the matching tabs now and changes no setting.
+  - No closes nothing and changes no setting. The same page asks again next
+    time.
+  - Always closes the matching tabs now and records that this host closes
+    duplicates without asking from then on.
+  - Never closes nothing, adds the host to the exclusion list of FR-14 and
+    disarms any Always standing on that host, so the extension ignores the
+    site entirely.
+- FR-8. Always and Never write ordinary settings: Always sets the
+  close-without-asking flag on a per-site entry for that host (FR-17), Never
+  adds an exclusion entry and clears that flag from every per-site entry the
+  exclusion covers, the named host and its subdomains alike. Never therefore
+  leaves no armed Always behind: a user who later removes the exclusion is
+  asked again rather than finding that the site resumed closing tabs
+  silently. Both kinds of entry are visible on the options page and can be
+  changed or removed there like any other entry.
+- FR-9. Dismissing the prompt without choosing means No. Nothing closes and
+  no setting changes. The prompt also gives up on its own after a delay
+  (default 30 seconds, user-configurable, 0 meaning it waits indefinitely),
+  which counts as No for the same reason: an unanswered question is not
+  permission.
+- FR-10. Only one prompt exists at a time. While a prompt is open, duplicates
+  found by another navigation are ignored; that page is caught the next time
+  it is navigated to.
+- FR-11. Closing several duplicates removes them one at a time, so one tab
+  that has already gone away does not cancel the rest.
+- FR-12. After a close, the extension shows a system notification naming how
+  many tabs it closed and which page they showed. The notification carries no
+  buttons and dismisses itself after a few seconds. It is what tells the user
+  about closes made under Always, which happen with no prompt. Recovering a
+  tab closed by mistake is Chrome's own reopen-closed-tab command.
+- FR-13. The extension reads no page content. It compares URLs only, and
+  never inspects, stores or transmits anything from a page. Drawing the
+  prompt does require permission to place it on a page, so Chrome asks for
+  access to all sites at install. That access is used for exactly two
+  things: reading the addresses of open tabs so they can be compared, and
+  placing the prompt on a page that has just produced a duplicate.
+
+** Matching rules
+
+Each rule below is an independent switch shown on the options page. Two URLs
+are the same page when every enabled rule, applied to both, leaves them
+equal. Defaults are chosen so that a fresh install behaves like Unique Tabs
+plus tracking-parameter removal.
+
+- R1. Ignore the fragment (default: on). URLs differing only after ~#~ are
+  the same page.
+- R2. Ignore a trailing slash (default: on). ~/docs~ and ~/docs/~ are the
+  same page.
+- R3. Ignore a leading ~www.~ (default: off). ~www.example.com~ and
+  ~example.com~ are the same host.
+- R4. Ignore the scheme (default: off). The ~http~ and ~https~ copies of a
+  URL are the same page.
+- R5. Drop known tracking parameters (default: on). The built-in list is
+  ~utm_source~, ~utm_medium~, ~utm_campaign~, ~utm_term~, ~utm_content~,
+  ~utm_id~, ~gclid~, ~gbraid~, ~wbraid~, ~fbclid~, ~msclkid~, ~yclid~,
+  ~mc_cid~, ~mc_eid~, ~igshid~ and ~_ga~. The list is visible on the options
+  page and individual entries can be switched off. It ships fixed and is
+  never fetched from the network; R6 is how a user covers what it misses.
+- R6. Drop user-listed parameters (default: empty). A user-supplied list of
+  parameter names removed in addition to R5.
+- R7. Drop the entire query string (default: off). Everything after ~?~ is
+  ignored. Overrides R5 and R6, which become irrelevant when it is on.
+- R8. Ignore parameter order (default: off). ~?a=1&b=2~ and ~?b=2&a=1~ are
+  the same page.
+- R9. Same host is the same page (default: off). Any two tabs on the host
+  match regardless of path or query. Intended for webmail and admin
+  consoles, and expected to be used per site rather than globally.
+- R10. Same host and path prefix is the same page (default: off). Matches on
+  the host plus the first N path segments, N set by the user. ~/issues/12~
+  and ~/issues/34~ are one page at N=1.
+
+** Exclusion list
+
+- FR-14. The user keeps a list of sites the extension ignores. An entry is a
+  host, and it matches that host and its subdomains.
+- FR-15. An excluded site is inert in both directions: navigating to it
+  triggers no close, and its tabs are never closed as duplicates of
+  something else.
+- FR-16. Exclusion wins over every other rule, including a per-site
+  configuration for the same host.
+
+** Per-site configuration
+
+- FR-17. The user keeps a list of per-site entries. Each entry names a host
+  and carries its own values for any of the rules R1 through R10, plus a
+  close-without-asking flag (default: off) that Always sets.
+- FR-18. A per-site entry starts from the global rules and overrides only
+  the rules it sets. Rules it does not mention keep their global values.
+- FR-19. An entry matches a host and its subdomains. When more than one
+  entry matches, the most specific host wins: ~mail.example.com~ beats
+  ~example.com~.
+- FR-20. The entry matching the tab that just navigated decides the rules
+  for that comparison. No blending of two entries occurs.
+- FR-21. Per-site entries can be added, edited and removed on the options
+  page.
+
+** Options page
+
+- FR-22. The options page is reachable from ~chrome://extensions~ and by
+  clicking the extension's toolbar icon.
+- FR-23. It presents, in this order: the global rules, the tracking
+  parameter list, the exclusion list, the per-site entries, the prompt
+  timeout, and the rule tester.
+- FR-24. The rule tester takes two URLs and reports whether the current
+  rules call them the same page. When they do not match it says what differs,
+  naming the part of the address, and then names the rule that would make
+  them match, or says that no single rule would.
+- FR-25. A "Clean up open tabs now" action applies the current rules to
+  every tab already open and closes the duplicates it finds. It asks once for
+  the whole sweep, naming the total number of tabs, rather than once per
+  page. Its prompt offers Yes and No only: Always and Never make no sense for
+  a batch spanning many hosts.
+- FR-26. Changes take effect immediately. No browser or extension restart is
+  needed.
+- FR-27. A "Reset to defaults" action restores every rule, list and the
+  prompt timeout to its shipped value, after a confirmation. This clears the
+  hosts recorded by Always and by Never along with everything else.
+
+** Settings storage
+
+- FR-28. Settings are stored per Chrome profile and sync to the user's other
+  signed-in Chrome installations.
+- FR-29. Settings never leave Chrome's own storage. The extension contacts
+  no server, collects no telemetry and bundles no analytics.
+- FR-30. If stored settings are missing or unreadable, the extension falls
+  back to the shipped defaults rather than doing nothing.
+
+** Performance
+
+These are requirements, not aspirations: a tab deduplicator that makes
+browsing slower has taken more than it gives.
+
+- FR-31. No extension code runs on a page unless that page has just produced
+  a duplicate. Nothing is declared to load on every page.
+- FR-32. Between navigations the extension does nothing at all: no polling,
+  no timers, no periodic work, and nothing that keeps a background process
+  alive. While the user is reading, the extension uses no CPU and holds no
+  process of its own.
+- FR-33. The work for a navigation happens after the page has loaded, and
+  never delays loading, rendering or input. A navigation that finds no
+  duplicate, which is almost all of them, costs one pass over the list of
+  open tabs and nothing else.
+- FR-34. The extension never reacts to a page's own address changes, only to
+  real navigations, because watching every address change on a
+  single-page application costs more than the duplicates it would catch.
+
+* Non-Goals
+
+1. No comparison of page content. Title, DOM and ~rel=canonical~ are not
+   consulted; the URL is the only input.
+2. No tab management beyond closing duplicates: no grouping, sorting,
+   searching, suspending or session saving.
+3. No deduplication across Chrome profiles, across browsers, or against
+   mobile devices.
+4. No deduplication of history or bookmarks.
+5. No merging of the state of two tabs. The closed tab's scroll position,
+   form contents and media playback are lost. Reopening the tab in Chrome
+   brings back the page, not that state.
+6. No regular-expression or wildcard URL patterns in the exclusion and
+   per-site lists for this version. Entries are hosts.
+7. No contribution of these changes back to the upstream Unique Tabs
+   extension.
+
+* Design Considerations
+
+- The options page is the product. It is a single scrolling page, plain
+  Chrome-styled form controls, following the browser's light and dark
+  setting. No framework, no custom widgets. Mockup (light mode):
+  [[https://claude.ai/artifact/LS6tp8qTuUuXuytCBhfJLq][DejaTab options page]].
+- Every rule is stated as a plain sentence with an example pair of URLs
+  beside it, so a user can tell what it does without experimenting.
+- The prompt is a banner drawn on the page that just loaded, not a system
+  notification: Chrome notifications allow at most two buttons and the prompt
+  needs four. It sits at the top of the page, above page content, names the
+  page in abbreviated form so a long URL does not overflow, and puts Yes and
+  No first, with Always and Never set apart as the answers that change
+  settings. Its contents are sealed: no site can read, restyle or click them.
+  Its placement is the page's, so an answer counts only from an untouched
+  banner. It disappears when it is answered or when the timeout in FR-9 runs
+  out.
+- The banner is the reason the extension asks for access to all sites, and
+  the store listing has to say so in those words: the access exists to place
+  the prompt and to compare addresses, and nothing reads the page. The
+  permission warning Chrome shows at install is the cost of putting four
+  answers where the decision is made.
+- The post-close notification is a Chrome basic notification with no buttons,
+  posted on a single notification id so a burst of closes updates one popup
+  instead of stacking several.
+- DejaTab needs its own icon and identity. It must not reuse the upstream
+  extension's artwork: the Chrome Web Store treats a near-identical listing
+  as a duplicate, and the upstream listing is live.
+- The repository keeps the upstream MIT license and its copyright notice,
+  and the README states that DejaTab derives from Unique Tabs.
+- Store listing assets needed before submission: a 128px icon, at least one
+  1280x800 screenshot of the options page, a short description, a detailed
+  description, and a privacy policy page stating that no data is collected.
+  The privacy policy lives in the repository and is served through GitHub
+  Pages, so it costs nothing and is versioned with the code.
+- Release order: the repository goes public first, and the store submission
+  waits until the rules have been used for about a week, because a rule that
+  closes a wanted tab is much cheaper to fix before there are other users.
+
+* Success Metrics
+
+1. No unintended closures. A tab the user wanted is never closed by the
+   shipped defaults. This is the bar the extension is judged against.
+2. No is rarely pressed. Under normal use fewer than one in twenty prompts
+   is answered No, which indicates the rules match intent.
+3. The prompt stops being a nuisance. After a week the sites a user visits
+   most are answered with Always, so the prompt appears on new sites rather
+   than on every navigation.
+4. The author's own browser holds no duplicate tabs after a week of use,
+   with no page lost.
+5. No measurable cost, judged by presence rather than by timings. A
+   performance recording of a page load shows nothing attributable to DejaTab
+   on the page's own thread, because no content script is declared, and
+   Chrome's task manager shows no DejaTab row while the user is reading
+   rather than navigating. Comparing page-load timings with and without the
+   extension is deliberately not the test: run-to-run variance in a page load
+   is far larger than any effect an extension that touches no page could
+   have, so the numbers would differ by tens of milliseconds and mean
+   nothing.
+6. The Chrome Web Store review passes on the first submission.
+7. The rule tester answers the question it exists for: a new user can
+   configure a per-site rule without closing a tab by accident while
+   experimenting.
+
+* Open Questions
+
+1. What the prompt is made of. Resolved 2026-09-27: a banner on the page,
+   which costs permission to access all sites. See FR-13.
+2. Undo after a close. Resolved 2026-09-27: rely on Chrome's own
+   Ctrl+Shift+T, no restore mechanism of our own.
+3. Tracking parameter list maintenance. Resolved 2026-09-27: ship a fixed
+   list the user can extend, never fetch one.
+4. Host patterns in the exclusion and per-site lists. Resolved 2026-09-27:
+   hosts only for this version.
+5. Whether ~rel=canonical~ should ever be consulted. A page can name its own
+   preferred address in its HTML, which would catch duplicates no URL rule
+   can, for instance a site serving one article at ~/p/123~ and at
+   ~/blog/my-post~. Reading it means reading page content. Options: (a) keep
+   it a non-goal; (b) read it, and drop the promise that no page content is
+   touched. Recommendation: (a). The all-sites permission is already granted
+   for the banner, so the permission argument is gone, but "we place a
+   banner and never read your pages" is a promise worth more than the extra
+   duplicates it would catch.
+6. Chrome Web Store account. Resolved 2026-09-27: register the account, and
+   host the privacy policy in the repository through GitHub Pages.
+7. Publish order. Resolved 2026-09-27: repository public first, store
+   submission after about a week of daily use.

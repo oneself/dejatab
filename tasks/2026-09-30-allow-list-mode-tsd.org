@@ -38,7 +38,7 @@ empty-list notice, a tester verdict and updated reset wording).
 |                       | ~actsOn~, negated. No other change.               |
 | ~src/options.html~      | A new "Where DejaTab acts" section at the top   |
 |                       | of the page and a new "Allowed sites" section   |
-|                       | directly before "Excluded sites".               |
+|                       | directly below it.                              |
 | ~src/options.js~        | Mode control binding, the allow-list rendering  |
 |                       | and add control, the empty-list notice, the     |
 |                       | tester verdict, the reset wording.              |
@@ -256,9 +256,9 @@ still happens across hosts inside that set, so R3 can still pair
 The page gains two sections. The full order becomes:
 
 1. Where DejaTab acts (new)
-2. Matching rules
-3. Tracking parameters
-4. Allowed sites (new)
+2. Allowed sites (new)
+3. Matching rules
+4. Tracking parameters
 5. Excluded sites
 6. Per-site rules
 7. When DejaTab asks
@@ -266,8 +266,9 @@ The page gains two sections. The full order becomes:
 9. Tabs already open (cleanup and reset)
 
 The mode control sits first because it decides whether any of the sections
-below it apply to a given site. The allow-list sits directly before the
-exclusion list so the two host lists read as a pair.
+below it apply to a given site. The allow-list sits directly below it,
+because the mode's second choice reads "Only the allowed sites below" and
+this list is what it refers to.
 
 *** Mode control
 
@@ -303,7 +304,10 @@ The allow-list's wording:
 - Invalid input shows the same message the exclusion list uses.
 
 When the mode is "All sites", the section shows an extra line: "These have
-no effect while DejaTab acts on every site." The list stays editable.
+no effect while DejaTab acts on every site." The list's card is greyed
+out, at half opacity so both themes follow from the existing colors, but
+stays editable so a list can be prepared before switching. In "Only listed
+sites" mode the card is shown normally and the line is hidden.
 
 *** Empty-list notice
 

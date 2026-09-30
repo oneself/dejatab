@@ -107,10 +107,11 @@ sites.
 - FR-16. The options page shows the mode setting as a two-choice control at
   the top of the page, above the global rules, because it decides whether
   everything below applies to a site at all.
-- FR-17. The allow-list is a new section placed directly before the
-  exclusion list, with the same add and remove controls. In "All sites" mode
-  the section stays visible and editable, with a one-line note that it has no
-  effect until the mode is switched.
+- FR-17. The allow-list is a new section placed directly below the mode
+  control, with the same add and remove controls as the exclusion list. In
+  "All sites" mode the section's list is greyed out but stays visible and
+  editable, with a one-line note that it has no effect until the mode is
+  switched. In "Only listed sites" mode it is shown normally.
 - FR-18. When the mode is "Only listed sites" and the allow-list is empty,
   the page shows a visible notice near the mode control stating that DejaTab
   currently acts on no site.
@@ -155,8 +156,9 @@ sites.
   the exclusion list still overrides it.
 - The empty-list notice (FR-18) uses the same style as the page's existing
   message line, not a modal.
-- The allow-list section reuses the exclusion list's look and controls, so
-  the two lists read as a pair.
+- The allow-list section reuses the exclusion list's look and controls, and
+  sits directly under the mode control, since the mode's second choice
+  refers to "the allowed sites below".
 - The README's description of what DejaTab does gains one sentence about the
   mode, since it currently says DejaTab acts on every site.
 

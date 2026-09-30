@@ -321,6 +321,8 @@ function renderMode() {
   $("mode-notice").hidden = !(listed && settings.allowedHosts.length === 0);
   // The allow-list stays editable in "All sites" mode, but says it is inert there [allow-list FR-8].
   $("allowed-inert").hidden = listed;
+  // And looks it: the card is greyed out while the switch is on every site, and only then [allow-list FR-17].
+  $("allowed-card").classList.toggle("inert", !listed);
 }
 
 // The two host lists, keyed by their settings field. Both share one entry shape, so one renderer and

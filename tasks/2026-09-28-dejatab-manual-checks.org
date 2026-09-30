@@ -575,7 +575,9 @@ every earlier item assumes "Every site, except the excluded sites below".
 When this section is done, "Reset to defaults" puts the page back.
 
 The mode is the "Where DejaTab acts" section at the top of the settings page,
-and the list is the "Allowed sites" section directly before Excluded sites.
+and the list is the "Allowed sites" section directly below it. The list is
+greyed out while "Every site, except the excluded sites below" is selected,
+and shown normally while "Only the allowed sites below" is.
 
 ** 51. With every site selected, nothing changes
 

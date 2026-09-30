@@ -54,6 +54,26 @@
         </div>
       </section>
 
+      <!-- Directly below the mode switch, since the second choice there is "the allowed sites below" and
+           this list is what it refers to [allow-list FR-17]. options.js greys the card out while the
+           switch is on every site. -->
+      <section class="sec">
+        <div class="sec-head">
+          <h2>Allowed sites</h2>
+          <p>In 'Only the allowed sites' mode, DejaTab acts on these sites and nothing else. An entry covers the
+            site and everything under it. Excluded sites stay excluded even when listed here.</p>
+          <p id="allowed-inert" hidden>These have no effect while DejaTab acts on every site.</p>
+        </div>
+        <div class="card list-card" id="allowed-card">
+          <div id="allowed"></div>
+          <div class="add-row">
+            <label for="add-allowed">Add a site</label>
+            <input type="text" id="add-allowed" class="fld mono grow" placeholder="example.com">
+            <button type="button" class="btn btn-quiet" id="add-allowed-go">Add</button>
+          </div>
+        </div>
+      </section>
+
       <section class="sec">
         <div class="sec-head">
           <h2>Matching rules</h2>
@@ -69,24 +89,6 @@
           <p>Removed from an address before it is compared, while the rule above is on.</p>
         </div>
         <div class="card tracking" id="tracking"></div>
-      </section>
-
-      <!-- Directly before Excluded sites so the two host lists read as a pair [allow-list FR-17]. -->
-      <section class="sec">
-        <div class="sec-head">
-          <h2>Allowed sites</h2>
-          <p>In 'Only the allowed sites' mode, DejaTab acts on these sites and nothing else. An entry covers the
-            site and everything under it. Excluded sites stay excluded even when listed here.</p>
-          <p id="allowed-inert" hidden>These have no effect while DejaTab acts on every site.</p>
-        </div>
-        <div class="card list-card">
-          <div id="allowed"></div>
-          <div class="add-row">
-            <label for="add-allowed">Add a site</label>
-            <input type="text" id="add-allowed" class="fld mono grow" placeholder="example.com">
-            <button type="button" class="btn btn-quiet" id="add-allowed-go">Add</button>
-          </div>
-        </div>
       </section>
 
       <section class="sec">

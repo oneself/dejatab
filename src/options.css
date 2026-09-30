@@ -271,6 +271,11 @@ select.fld { padding: 7px 8px; }
 .mode { padding: 18px 20px; }
 .mode-choices { display: flex; flex-direction: column; gap: 12px; }
 
+/* The allow-list card while the switch is on every site: greyed out, but still usable, so a list can
+   be prepared before switching [allow-list FR-8, FR-17]. Opacity rather than new colours, so both
+   themes follow from the existing variables. */
+.list-card.inert { opacity: 0.5; }
+
 /* A lasting "DejaTab does nothing" state, in the error message's colours but inside the card, since
    it describes the settings rather than the result of an action [allow-list FR-18]. */
 .notice {

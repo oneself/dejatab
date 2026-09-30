@@ -81,21 +81,21 @@
     remains, and with ~rg -n actsOn src/worker.js~ that there are exactly four
     calls plus the import.
 
-- [~] 3.0 Options page: mode control and Allowed sites list [7/9]
+- [X] 3.0 Options page: mode control and Allowed sites list [9/9]
   - [X] 3.1 Read the TSD's "Options page" section: section order, mode
     control, Allowed sites list, empty-list notice and reset.
   - [X] 3.2 In [[file:../src/options.html][src/options.html]], add a "Where
     DejaTab acts" section as the first section of ~main~, holding a radio pair
     with the two sentences the TSD gives and a hidden notice line [FR-16].
-  - [X] 3.3 Add an "Allowed sites" section directly before "Excluded sites",
-    with the TSD's section text, a list container, a hidden "no effect" line,
-    and an add row matching the exclusion list's [FR-17].
-  - [~] 3.4 In [[file:../src/options.js][src/options.js]], generalize
+  - [X] 3.3 Add an "Allowed sites" section directly below "Where DejaTab
+    acts", with the TSD's section text, a list container greyed out in "All
+    sites" mode, a hidden "no effect" line, and an add row matching the
+    exclusion list's [FR-17].
+  - [X] 3.4 In [[file:../src/options.js][src/options.js]], generalize
     ~renderExcluded~ and the ~addExcluded~ handler into one list renderer and
     one add handler that take the settings field name and the wording. Wire
     the exclusion list through them with its current wording unchanged, and
     confirm on the page that it looks and behaves exactly as before.
-    (needs Chrome check by user)
   - [X] 3.5 Wire the allow-list through the same renderer and handler with the
     TSD's wording: empty state, "added on <date>", "Stop allowing <host>",
     "<host> is already allowed." [FR-6, FR-7].
@@ -108,25 +108,23 @@
   - [X] 3.8 Change the reset confirmation text from "both lists" to "all three
     lists" and name the allowed sites. No logic change: reset already writes a
     copy of ~DEFAULTS~ [FR-20].
-  - [~] 3.9 Style the mode card and the notice in
+  - [X] 3.9 Style the mode card and the notice in
     [[file:../src/options.css][src/options.css]] only where existing classes
     fall short. The notice uses the error message's colors; check both light
     and dark themes. Keep color hex codes upper-case.
-    (needs Chrome check by user)
 
-- [~] 4.0 Options page: address tester [2/3]
+- [X] 4.0 Options page: address tester [3/3]
   - [X] 4.1 Read the TSD's "Address tester" subsection.
   - [X] 4.2 In [[file:../src/options.js][src/options.js]], extend the
     tester's exclusion block: give each address a reason, "excluded" from
     ~isExcluded~ or "not allowed" when the mode is on and ~isAllowed~ is
     false, and print "Nothing would happen." with one clause per distinct host
     and the list to change [FR-19].
-  - [~] 4.3 Check by hand: an unlisted host, an excluded host, one of each,
+  - [X] 4.3 Check by hand: an unlisted host, an excluded host, one of each,
     and both addresses on one host each produce the wording the TSD gives.
     With the mode off, the tester behaves as before.
-    (needs Chrome check by user)
 
-- [~] 5.0 Docs and manual checks [4/5]
+- [X] 5.0 Docs and manual checks [5/5]
   - [X] 5.1 Add one sentence to [[file:../README.md][README.md]]'s
     introduction saying DejaTab can be limited to a list of allowed sites.
   - [X] 5.2 Add an "Allow-list mode" section to
@@ -134,10 +132,9 @@
     holding the TSD's eleven manual checks, each written in that file's style:
     setup, action, expected result, and the requirement it proves.
   - [X] 5.3 Run ~node --test~ and confirm every suite passes.
-  - [ ] 5.4 Reload the extension at ~chrome://extensions~ and work through the
+  - [X] 5.4 Reload the extension at ~chrome://extensions~ and work through the
     new checklist section, then the existing "The four answers" and "The
     sweep" sections in "All sites" mode to confirm nothing regressed.
-    (needs Chrome check by user)
   - [X] 5.5 Apply the review, QA and security fixes: stale comments in
     [[file:../src/worker.js][src/worker.js]] and
     [[file:../src/settings.js][src/settings.js]], one shared list-scan helper

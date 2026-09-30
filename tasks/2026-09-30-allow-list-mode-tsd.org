@@ -1,0 +1,453 @@
+#+STARTUP: overview
+#+TITLE: Allow-list mode - Technical Specification Document
+#+STARTUP: showall
+#+PRD: [[file:2026-09-30-allow-list-mode-prd.org][Allow-list mode - PRD]]
+
+* Overview
+
+DejaTab acts on every site except the hosts on its exclusion list. The PRD
+adds a second mode, "Only listed sites", in which DejaTab acts only on hosts
+the user puts on a new allow-list. Sites outside the list become inert in
+both directions, exactly as excluded sites are today: navigating there
+triggers nothing, and their tabs are never closed as duplicates.
+
+The technical approach rests on one observation: every place the extension
+decides whether to touch a host already asks the same question, "is this
+host excluded?", through one function in ~src/settings.js~. The feature
+replaces that question with a broader one, "does DejaTab act on this host?",
+answered by one new function that combines the exclusion list, the mode and
+the allow-list. The worker's call sites switch to the new function and
+nothing else in the worker's logic changes. The prompt, the rules, the
+per-site entries and the answers keep their current behavior.
+
+The rest of the work is storage (two new fields in the existing settings
+object) and the options page (a mode control, a new list section, an
+empty-list notice, a tester verdict and updated reset wording).
+
+* Architecture
+
+** Files
+
+|-----------------------+-------------------------------------------------|
+| File                  | Change                                          |
+|-----------------------+-------------------------------------------------|
+| ~src/settings.js~       | Two new fields in ~DEFAULTS~ and in               |
+|                       | ~coerceSettings~. Two new exported functions:     |
+|                       | ~isAllowed~ and ~actsOn~.                           |
+| ~src/worker.js~         | Four calls to ~isExcluded~ become calls to        |
+|                       | ~actsOn~, negated. No other change.               |
+| ~src/options.html~      | A new "Where DejaTab acts" section at the top   |
+|                       | of the page and a new "Allowed sites" section   |
+|                       | directly before "Excluded sites".               |
+| ~src/options.js~        | Mode control binding, the allow-list rendering  |
+|                       | and add control, the empty-list notice, the     |
+|                       | tester verdict, the reset wording.              |
+| ~src/options.css~       | Styling for the mode control and the notice, if |
+|                       | the existing classes do not already cover them. |
+| ~test/settings.test.js~ | Cases for the new fields and functions.         |
+| ~README.md~             | One sentence on the mode in the introduction.   |
+|-----------------------+-------------------------------------------------|
+
+~src/rules.js~, ~src/banner.js~ and ~manifest.json~ do not change.
+
+** Component relationships
+
+#+begin_example
+                chrome.storage.sync, key "settings"
+                  existing fields ...
+                + allowListOnly   (boolean)
+                + allowedHosts    (list of host entries)
+                          |
+                          v
+  src/settings.js
+    coerceSettings  cleans the two new fields like every other field
+    isExcluded      unchanged: host on the exclusion list
+    isAllowed       new: host on the allow-list
+    actsOn          new: not excluded, and either the mode is
+                    "All sites" or the host is allowed
+    withAlways      unchanged
+    withNever       unchanged (Never still writes an exclusion)
+                          |
+          +---------------+-----------------+
+          v                                 v
+  src/worker.js                     src/options.js
+    navigation handler:              mode control
+      stop unless actsOn             "Allowed sites" list
+    duplicate candidate filter:      empty-list notice
+      skip tabs not actsOn           tester: reports excluded and
+    re-check before close:             not-allowed hosts
+      spare tabs not actsOn          reset wording
+    cleanup sweep tab filter:
+      skip tabs not actsOn
+#+end_example
+
+** Why one combined function
+
+Today ~isExcluded~ is called in four places in ~src/worker.js~, each
+meaning "leave this host alone". Adding a separate allow-list check next to
+each call would work, but it creates four places where a future change can
+forget one of the two checks, and the failure would be a tab closed on a
+site the user never allowed. One function, ~actsOn~, that answers the whole
+question means the worker cannot check one list and forget the other.
+
+~isExcluded~ stays exported and unchanged, because the options page's
+tester needs to know which of the two reasons applies to a host so it can
+name the right one to the user. ~isAllowed~ is exported for the same reason.
+
+** Event flow for one navigation
+
+The flow is the existing one. Only step 3 changes what it asks.
+
+1. A top-frame navigation completes and the worker's navigation handler
+   runs.
+2. The worker reads settings through its cache. The cache is dropped on
+   every ~chrome.storage.onChanged~ event, so a mode switch or a list edit
+   on the options page applies to the very next navigation. This is why the
+   PRD's "takes effect immediately" requirement needs no new code.
+3. If ~actsOn~ is false for the navigated tab's host, the handler returns.
+   This replaces the current exclusion short-circuit.
+4. Rules are resolved and the survivor's key is computed, unchanged.
+5. The candidate tabs are filtered. A candidate whose host fails ~actsOn~ is
+   dropped, which is what keeps an unlisted site's tabs from being closed
+   as duplicates of a listed one.
+6. The prompt, the answer and the close proceed as today. Before each close,
+   the re-check of the tab also uses ~actsOn~, so a host removed from the
+   allow-list, or the mode switched, while the banner was waiting, keeps its
+   tabs.
+
+* Data Model
+
+** The settings object
+
+Two fields are added to the existing object. Every other field is unchanged.
+
+|---------------+---------+-------------------------------------------|
+| Field         | Type    | Default and meaning                       |
+|---------------+---------+-------------------------------------------|
+| ~allowListOnly~ | boolean | false. false is "All sites", true is      |
+|               |         | "Only listed sites".                      |
+| ~allowedHosts~  | list    | Empty. Host entries DejaTab acts on while |
+|               |         | ~allowListOnly~ is true. Kept, and          |
+|               |         | editable, while it is false.              |
+|---------------+---------+-------------------------------------------|
+
+A boolean is used for the mode rather than a named value because there are
+exactly two modes, and the settings module's shape check already handles a
+boolean: a stored value that is not a boolean falls back to the default.
+
+** An allow-list entry
+
+The same shape as an exclusion entry, so both lists can share host
+cleaning, matching and rendering.
+
+|---------+--------+----------------------------------------------------|
+| Field   | Type   | Meaning                                            |
+|---------+--------+----------------------------------------------------|
+| ~host~    | string | Lower-case host, no scheme, path, port or trailing |
+|         |        | dot. Matches this host and its subdomains.         |
+| ~source~  | string | Always "user", since entries are added only on the |
+|         |        | options page. Kept so the shared list rendering    |
+|         |        | reads both lists the same way.                     |
+| ~addedAt~ | string | ISO 8601 date the entry was added.                 |
+|---------+--------+----------------------------------------------------|
+
+** Stored settings from the current version
+
+No migration and no ~schemaVersion~ change. ~coerceSettings~ already builds
+every field from its default when the stored object lacks it, so settings
+saved by the current version load as "All sites" with an empty allow-list,
+which is the current behavior.
+
+** Sync size
+
+Each allow-list entry adds roughly sixty bytes to the single synced
+settings item, which Chrome caps at 8 KB. The existing handling of a failed
+write covers the case where the item grows past the cap: the options page
+shows the write error and the in-memory settings stay in effect.
+
+* API Design
+
+There is no network API and no new message type. The options page writes
+settings directly with ~saveSettings~ and the worker picks the change up
+through its storage listener, as every other setting does today.
+
+** New functions in ~src/settings.js~
+
+Both are pure functions of a host and a settings object, like
+~isExcluded~, so they run under ~node --test~ without a browser.
+
+- ~isAllowed~: given a host and settings, returns true when the host
+  equals an allow-list entry or is a subdomain of one at a dot boundary. It
+  uses the same host normalization (lower case, trailing dot removed) and
+  the same suffix match that ~isExcluded~ uses. It ignores the mode: it
+  answers only whether the host is on the list.
+- ~actsOn~: given a host and settings, returns true when DejaTab should
+  act on the host, by these steps in order:
+  1. A missing or empty host returns false.
+  2. A host on the exclusion list returns false. Exclusion is checked first
+     because it wins in both modes.
+  3. When ~allowListOnly~ is false, returns true.
+  4. Otherwise returns the result of ~isAllowed~.
+
+** Changed call sites in ~src/worker.js~
+
+Each of these currently skips a host when ~isExcluded~ is true. Each
+switches to skipping a host when ~actsOn~ is false. The comments at each
+call site name the allow-list alongside the exclusion list.
+
+|--------------------+----------------------------------------|
+| Function           | What the check guards                  |
+|--------------------+----------------------------------------|
+| navigation handler | Whether this navigation is looked at.  |
+| ~duplicatesOf~       | Whether a candidate tab can be closed. |
+| ~stillMatches~       | Whether a tab still qualifies at the   |
+|                    | moment of closing.                     |
+| ~planCleanup~        | Which tabs the sweep counts.           |
+|--------------------+----------------------------------------|
+
+After the change, ~isExcluded~ has no caller in the worker, so its import
+there is removed.
+
+* Logic and Processing
+
+** Deciding whether DejaTab acts on a host
+
+|-------------+-------------------+---------------+-------|
+| Mode        | On exclusion list | On allow-list | Acts? |
+|-------------+-------------------+---------------+-------|
+| All sites   | no                | any           | yes   |
+| All sites   | yes               | any           | no    |
+| Only listed | no                | yes           | yes   |
+| Only listed | no                | no            | no    |
+| Only listed | yes               | yes           | no    |
+|-------------+-------------------+---------------+-------|
+
+Both lists match subdomains, and they are checked independently. Allowing
+~example.com~ and excluding ~mail.example.com~ therefore leaves
+~mail.example.com~ inert and every other subdomain of ~example.com~ active.
+The reverse, excluding ~example.com~ and allowing ~mail.example.com~, leaves
+~mail.example.com~ inert as well, because exclusion is checked first.
+
+** Rules on an allowed host
+
+Unchanged. ~resolveRules~ does not look at the allow-list. An allowed host
+uses the global rules, overlaid by its most specific per-site entry if one
+exists. A per-site entry does not make a host allowed; only an allow-list
+entry does.
+
+** The prompt's answers
+
+Unchanged code. ~withAlways~ sets the close-without-asking flag on the
+host's per-site entry and leaves the allow-list alone. ~withNever~ adds an
+exclusion entry and clears the flag, and leaves the allow-list alone; the
+host stops being acted on because ~actsOn~ checks exclusion first.
+
+** Cleanup sweep
+
+Unchanged logic, with ~actsOn~ as the tab filter. In "Only listed sites"
+mode, the sweep groups only tabs on allowed, non-excluded hosts. Grouping
+still happens across hosts inside that set, so R3 can still pair
+~www.example.com~ with ~example.com~ when both are covered by the list.
+
+** Options page
+
+*** Section order
+
+The page gains two sections. The full order becomes:
+
+1. Where DejaTab acts (new)
+2. Matching rules
+3. Tracking parameters
+4. Allowed sites (new)
+5. Excluded sites
+6. Per-site rules
+7. When DejaTab asks
+8. Try two addresses
+9. Tabs already open (cleanup and reset)
+
+The mode control sits first because it decides whether any of the sections
+below it apply to a given site. The allow-list sits directly before the
+exclusion list so the two host lists read as a pair.
+
+*** Mode control
+
+A card holding a radio pair, each option a plain sentence:
+
+- "Every site, except the excluded sites below"
+- "Only the allowed sites below"
+
+Selecting an option writes ~allowListOnly~ through the page's existing
+persist path, which saves and re-renders. Rendering sets the checked option
+from the current settings, so a change made in another options tab, or by
+the worker, is reflected.
+
+*** Allowed sites list
+
+The exclusion list's rendering and its add control are generalized into one
+list renderer and one add handler, each given the name of the settings
+field to work on and the wording to show. Both lists then use them. This is
+chosen over copying the exclusion code because the two lists have the same
+entry shape, the same host cleaning and the same remove behavior, and a
+copy would be two places to keep in sync.
+
+The allow-list's wording:
+
+- Section text: "In 'Only the allowed sites' mode, DejaTab acts on these
+  sites and nothing else. An entry covers the site and everything under it.
+  Excluded sites stay excluded even when listed here."
+- Empty state: "No sites are allowed yet."
+- Row origin label: "added on <date>".
+- Remove button's accessible label: "Stop allowing <host>".
+- Adding a host already on the list shows "<host> is already allowed." and
+  changes nothing.
+- Invalid input shows the same message the exclusion list uses.
+
+When the mode is "All sites", the section shows an extra line: "These have
+no effect while DejaTab acts on every site." The list stays editable.
+
+*** Empty-list notice
+
+When the mode is "Only listed sites" and the allow-list is empty, the mode
+card shows a persistent line: "No sites are allowed, so DejaTab does
+nothing. Add a site under Allowed sites." It uses the colors of the page's
+existing error message, but sits inside the card rather than in the fixed
+status line at the bottom, because it describes a lasting state rather than
+the result of an action. It disappears as soon as a site is added or the
+mode is switched back.
+
+*** Address tester
+
+The tester already reports "Nothing would happen" when either address's
+host is excluded. It is extended to report hosts that DejaTab does not act
+on for either reason:
+
+1. For each of the two addresses, decide its reason, if any: "excluded"
+   when ~isExcluded~ is true, otherwise "not allowed" when the mode is "Only
+   listed sites" and ~isAllowed~ is false.
+2. If neither address has a reason, the tester proceeds as today.
+3. Otherwise it prints "Nothing would happen." followed by one clause per
+   distinct host with a reason, for example "news.example is not an
+   allowed site" or "localhost is an excluded site", and a closing
+   instruction naming the list to change: add it under Allowed sites, or
+   remove it from Excluded sites. When both addresses share one host, that
+   host is named once.
+
+*** Reset to defaults
+
+No logic change: reset writes a copy of ~DEFAULTS~, which now carries the
+two new fields, so the mode returns to "All sites" and the allow-list
+empties. The confirmation text changes from "both lists" to "all three
+lists" and names the allowed sites alongside the sites recorded by Always
+and Never.
+
+* Security and Authorization
+
+- No new permission. The extension keeps its access to all sites in both
+  modes (PRD non-goal 1).
+- Typed hosts go through the existing ~normalizeHost~, which rejects
+  anything that is not a plausible host. This keeps unmatchable entries out
+  of storage and keeps the subdomain suffix match honest.
+- Stored allow-list entries are cleaned on read by the same routine that
+  cleans exclusion entries, so a stored entry without a usable host is
+  dropped rather than reaching the matcher.
+- Entries are rendered as text nodes, as the existing lists are, so a host
+  string cannot inject markup into the options page.
+- A page cannot add itself to the allow-list: the list is written only by
+  the options page, and the banner's answers never touch it.
+
+* Error Handling
+
+|--------------------------+--------------------------------------------------|
+| Situation                | Behavior                                         |
+|--------------------------+--------------------------------------------------|
+| ~allowListOnly~ stored     | Falls back to false ("All sites"). Other fields  |
+| as a non-boolean         | are unaffected.                                  |
+| ~allowedHosts~ stored as   | Falls back to an empty list. With the mode also  |
+| a non-list               | on, DejaTab acts on nothing and the options page |
+|                          | shows the empty-list notice, which tells the     |
+|                          | user why.                                        |
+| An allow-list entry with | Dropped on read.                                 |
+| no usable host           |                                                  |
+| A tab's address has no   | ~actsOn~ returns false, so the tab is neither      |
+| host                     | looked at nor closed.                            |
+| Settings write fails     | Existing handling: the options page shows the    |
+| (including sync quota)   | error and the in-memory value stays in effect    |
+|                          | for the session.                                 |
+| Mode switched or host    | The re-check before each close uses ~actsOn~, so   |
+| removed while a banner   | the tabs on a host no longer acted on stay open. |
+| is waiting               |                                                  |
+|--------------------------+--------------------------------------------------|
+
+Every failure resolves toward DejaTab doing less, never toward closing a
+tab on a site the user did not allow.
+
+* Performance Considerations
+
+~actsOn~ is one or two linear scans over short host lists, the same cost
+as the exclusion check it replaces, run once for the navigated tab and once
+per candidate tab. No timer, alarm, content script or storage read is
+added: the two new fields ride in the settings object the worker already
+reads and caches.
+
+* Dependencies
+
+None. No library, service, permission or build step is added.
+
+* Testing Strategy
+
+** Automated
+
+In ~test/settings.test.js~, run with ~node --test~. All cases are pure,
+needing no browser.
+
+1. Defaults: ~DEFAULTS~ has ~allowListOnly~ false and an empty
+   ~allowedHosts~.
+2. ~coerceSettings~ on an object without the two fields yields the defaults
+   and keeps every other stored field.
+3. ~coerceSettings~ on a non-boolean ~allowListOnly~ and a non-list
+   ~allowedHosts~ falls back for each field independently.
+4. ~coerceSettings~ lower-cases allow-list hosts, strips a trailing dot,
+   and drops entries with no usable host.
+5. ~isAllowed~: exact host, subdomain, a host that only ends in the same
+   letters (~notexample.com~ against ~example.com~), upper-case input, a
+   trailing dot.
+6. ~actsOn~ covers every row of the decision table in Logic and
+   Processing.
+7. ~actsOn~ with a subdomain exclusion under an allowed parent, and a
+   subdomain allowed under an excluded parent: both inert.
+8. ~actsOn~ with an empty or missing host returns false in both modes.
+9. ~actsOn~ with the mode on and an empty allow-list returns false for
+   every host.
+
+** Manual
+
+Added to the manual checklist, run in a real profile:
+
+1. With "All sites", behavior matches the current release, including with
+   entries on the allow-list.
+2. Switch to "Only listed sites" with an empty list: the notice appears and
+   duplicates on any site produce no banner.
+3. Allow one host: duplicates there prompt and close as before; duplicates
+   on any other host produce nothing.
+4. With R3 on and only ~www.example.com~ allowed, open ~example.com/a~,
+   then navigate another tab to ~www.example.com/a~. The rules call them
+   the same page, but ~example.com~ is not under the allowed entry, so its
+   tab is not closed and no banner offers to close it.
+5. Answer Never on an allowed host: the host appears under Excluded sites,
+   stays under Allowed sites, and stops prompting.
+6. Remove a host from the allow-list while its banner is up, then answer
+   Yes: nothing closes.
+7. The cleanup sweep in "Only listed sites" mode counts only tabs on
+   allowed hosts.
+8. The tester names an unlisted host as not allowed, an excluded host as
+   excluded, and both when the two addresses have different reasons.
+9. Switch modes back and forth: both lists and the per-site entries are
+   unchanged.
+10. Reset to defaults returns the mode to "All sites" and empties the
+    allow-list.
+11. The mode and the allow-list reach a second machine signed into the same
+    Chrome profile.
+
+* Open Questions
+
+None.

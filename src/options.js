@@ -19,6 +19,7 @@ import { TRACKING_PARAMS, canonicalKey, explainDifference } from "./rules.js";
 import {
   DEFAULTS,
   hostOf,
+  isAllowed,
   isExcluded,
   loadSettings,
   normalizeHost,
@@ -293,7 +294,7 @@ function buildTracking() {
   }
 }
 
-// Push the stored values into the controls, and rebuild the two lists. Called after every change,
+// Push the stored values into the controls, and rebuild the three lists. Called after every change,
 // whether it was made here or arrived from a banner's Always or Never.
 function render() {
   const rules = settings.rules;
@@ -304,31 +305,65 @@ function render() {
   }
   for (const name of TRACKING_PARAMS) $("tp-" + name).checked = !rules.trackingParamsOff.includes(name);
   $("timeout").value = String(settings.bannerTimeoutSeconds);
-  renderExcluded();
+  renderMode();
+  for (const field of Object.keys(HOST_LISTS)) renderHosts(field);
   renderSites();
 }
 
-// The exclusion list [FR-14]. The origin label is the entry's source field: an entry the user typed
-// against one a Never answer wrote [FR-8].
-function renderExcluded() {
-  const box = $("excluded");
+// The mode control and its two dependent lines [allow-list FR-3, FR-8, FR-18]. The radios are set
+// from settings on every render, so a change made in another options tab shows up here.
+function renderMode() {
+  const listed = settings.allowListOnly === true;
+  $("mode-all").checked = !listed;
+  $("mode-listed").checked = listed;
+  // An empty allow-list in "Only listed sites" mode means DejaTab does nothing, which must not be
+  // a surprise [allow-list FR-18].
+  $("mode-notice").hidden = !(listed && settings.allowedHosts.length === 0);
+  // The allow-list stays editable in "All sites" mode, but says it is inert there [allow-list FR-8].
+  $("allowed-inert").hidden = listed;
+}
+
+// The two host lists, keyed by their settings field. Both share one entry shape, so one renderer and
+// one add handler serve both, and only the words differ [TSD Allowed sites list]. `id` is the list
+// container, and the add field and its button are id "add-" + id and "add-" + id + "-go".
+const HOST_LISTS = {
+  // The exclusion list [FR-14]. The origin label is the entry's source field: an entry the user
+  // typed against one a Never answer wrote [FR-8].
+  excludedHosts: {
+    id: "excluded",
+    empty: "No sites are excluded. DejaTab looks at every site.",
+    origin: (entry) => (entry.source === "never" ? "added by Never" : "added by you"),
+    removeLabel: "Stop excluding ",
+    already: " is already excluded."
+  },
+  // The allow-list [allow-list FR-6, FR-7]. Every entry is typed here, so there is no source to name.
+  allowedHosts: {
+    id: "allowed",
+    empty: "No sites are allowed yet.",
+    origin: () => "added",
+    removeLabel: "Stop allowing ",
+    already: " is already allowed."
+  }
+};
+
+// One host list: a row per entry with its origin, date and a Remove button, or the empty line.
+function renderHosts(field) {
+  const words = HOST_LISTS[field];
+  const box = $(words.id);
   box.textContent = "";
-  if (settings.excludedHosts.length === 0) {
-    box.append(el("p", "empty", "No sites are excluded. DejaTab looks at every site."));
+  if (settings[field].length === 0) {
+    box.append(el("p", "empty", words.empty));
     return;
   }
-  for (const entry of settings.excludedHosts) {
+  for (const entry of settings[field]) {
     const row = el("div", "row");
     row.append(el("span", "host", entry.host));
-    const origin = entry.source === "never" ? "added by Never" : "added by you";
+    const origin = words.origin(entry);
     row.append(el("span", "origin", entry.addedAt ? origin + " on " + shortDate(entry.addedAt) : origin));
     const remove = button("btn-link", "Remove", () => {
-      persist({
-        ...settings,
-        excludedHosts: settings.excludedHosts.filter((each) => each.host !== entry.host)
-      });
+      persist({ ...settings, [field]: settings[field].filter((each) => each.host !== entry.host) });
     });
-    remove.setAttribute("aria-label", "Stop excluding " + entry.host);
+    remove.setAttribute("aria-label", words.removeLabel + entry.host);
     row.append(remove);
     box.append(row);
   }
@@ -563,22 +598,15 @@ function runTester() {
     return;
   }
 
-  // An excluded site is inert in both directions: it is never closed and never asks [FR-15]. So a
-  // same-or-different answer about its addresses would be true of the rules and false of what the
-  // extension would do, which is the one thing this tester exists to answer. Naming the excluded
-  // site is the whole answer for the pair, whichever side of it is excluded.
-  const hostB = hostOf(b);
-  const excludedA = isExcluded(hostA, settings);
-  const excludedB = isExcluded(hostB, settings);
-  if (excludedA || excludedB) {
-    const hosts = excludedA && excludedB && hostA !== hostB ? [hostA, hostB] : [excludedA ? hostA : hostB];
-    const many = hosts.length > 1;
+  // A site DejaTab does not act on is inert in both directions: it is never closed and never asks
+  // [FR-15, allow-list FR-10]. So a same-or-different answer about its addresses would be true of the
+  // rules and false of what the extension would do, which is the one thing this tester exists to
+  // answer. Naming that site is the whole answer for the pair, whichever side of it is inert.
+  const inert = inertHosts([hostA, hostOf(b)]);
+  if (inert.length) {
     const line = el("span", "");
     line.append(el("strong", "", "Nothing would happen. "));
-    line.append(el("span", "said", hosts.join(" and ") + (many ? " are excluded sites" : " is an excluded site") +
-      ", so DejaTab ignores " + (many ? "them" : "it") + " entirely: it closes no tabs there and never asks. " +
-      "Remove " + (many ? "them" : "it") + " from Excluded sites above to test these rules against " +
-      (many ? "them" : "it") + "."));
+    line.append(el("span", "said", inertSentence(inert)));
     verdict.append(mark("diff"), line);
     return;
   }
@@ -608,6 +636,45 @@ function runTester() {
   keys.append(el("span", "", "After your rules run: "), el("span", "u", canonicalKey(a, rules)),
     el("span", "", " against "), el("span", "u", canonicalKey(b, rules)));
   keys.hidden = false;
+}
+
+// The two reasons DejaTab leaves a host alone, in the order they are checked, each with the words
+// that name it and the change that would undo it [allow-list FR-19].
+const INERT_WORDS = {
+  excluded: { one: " is an excluded site", many: " are excluded sites", fix: "remove {} from Excluded sites" },
+  "not allowed": { one: " is not an allowed site", many: " are not allowed sites", fix: "add {} under Allowed sites" }
+};
+
+// Each distinct host DejaTab would leave alone, with its reason. Exclusion comes first because it
+// wins in both modes; "not allowed" applies only while the mode is on. A host both addresses share
+// is named once, and an address with no host has no reason, as before the allow-list existed.
+function inertHosts(hosts) {
+  const found = [];
+  for (const host of new Set(hosts)) {
+    if (!host) continue;
+    let reason = "";
+    if (isExcluded(host, settings)) reason = "excluded";
+    else if (settings.allowListOnly === true && !isAllowed(host, settings)) reason = "not allowed";
+    if (reason) found.push({ host, reason });
+  }
+  return found;
+}
+
+// The verdict's sentence for inert hosts: one clause per reason, then the list to change. With one
+// reason the fix says "it" or "them"; with two, each fix names its own host so the two do not blur.
+// With only excluded hosts the words are exactly those the tester used before the allow-list.
+function inertSentence(inert) {
+  const pronoun = inert.length > 1 ? "them" : "it";
+  const groups = [];
+  for (const reason of Object.keys(INERT_WORDS)) {
+    const hosts = inert.filter((each) => each.reason === reason).map((each) => each.host);
+    if (hosts.length) groups.push({ words: INERT_WORDS[reason], hosts });
+  }
+  const clauses = groups.map((g) => g.hosts.join(" and ") + (g.hosts.length > 1 ? g.words.many : g.words.one));
+  const fixes = groups.map((g) => g.words.fix.replace("{}", groups.length > 1 ? g.hosts.join(" and ") : pronoun));
+  const fix = fixes.join(" and ");
+  return clauses.join(" and ") + ", so DejaTab ignores " + pronoun + " entirely: it closes no tabs there and " +
+    "never asks. " + fix[0].toUpperCase() + fix.slice(1) + " above to test these rules against " + pronoun + ".";
 }
 
 // One of the two verdict marks.
@@ -678,11 +745,12 @@ async function cleanupNow() {
   showStatus("Closed " + count(done.closed, "tab") + ".");
 }
 
-// "Reset to defaults" [FR-27]. Every rule, both lists and the timeout go back to their shipped
-// values, which clears the hosts an Always and a Never recorded along with everything else.
+// "Reset to defaults" [FR-27, allow-list FR-20]. Every rule, all three lists, the mode and the timeout
+// go back to their shipped values, which clears the allowed sites and the hosts an Always and a Never
+// recorded along with everything else.
 async function resetAll() {
-  const question = "Reset every rule, both lists and the prompt timeout to their shipped values? " +
-    "The sites recorded by Always and by Never are cleared too.";
+  const question = "Reset every rule, all three lists and the prompt timeout to their shipped values? " +
+    "The allowed sites and the sites recorded by Always and by Never are cleared too.";
   if (!await askConfirm(question, "Reset everything")) return;
   closeEditor();
   // DEFAULTS is frozen, so the page writes and then edits a deep copy of it.
@@ -705,33 +773,38 @@ function bind() {
     persist({ ...settings, bannerTimeoutSeconds: seconds });
   });
 
-  const addExcluded = () => {
-    const field = $("add-excluded");
-    const typed = field.value;
-    const host = normalizeHost(typed);
-    if (!host) {
-      showStatus('"' + typed.trim() + '" is not a site DejaTab can use. Type a site such as example.com.', true);
-      return;
-    }
-    if (settings.excludedHosts.some((each) => each.host === host)) {
-      showStatus(host + " is already excluded.");
+  // Either radio writes the mode; which one is checked is the whole value [allow-list FR-16].
+  for (const id of ["mode-all", "mode-listed"]) {
+    $(id).addEventListener("change", () => persist({ ...settings, allowListOnly: $("mode-listed").checked }));
+  }
+
+  for (const [listField, words] of Object.entries(HOST_LISTS)) {
+    const addHost = () => {
+      const field = $("add-" + words.id);
+      const typed = field.value;
+      const host = normalizeHost(typed);
+      if (!host) {
+        showStatus('"' + typed.trim() + '" is not a site DejaTab can use. Type a site such as example.com.', true);
+        return;
+      }
+      if (settings[listField].some((each) => each.host === host)) {
+        showStatus(host + words.already);
+        field.value = "";
+        return;
+      }
       field.value = "";
-      return;
-    }
-    field.value = "";
-    persist({
-      ...settings,
-      excludedHosts: [...settings.excludedHosts, { host, source: "user", addedAt: today() }]
+      // Typed here, so the source is always "user" in both lists.
+      persist({ ...settings, [listField]: [...settings[listField], { host, source: "user", addedAt: today() }] });
+    };
+    $("add-" + words.id + "-go").addEventListener("click", addHost);
+    // Enter in the field does what the button does, since a list is filled in one entry at a time.
+    $("add-" + words.id).addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addHost();
+      }
     });
-  };
-  $("add-excluded-go").addEventListener("click", addExcluded);
-  // Enter in the field does what the button does, since a list is filled in one entry at a time.
-  $("add-excluded").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      addExcluded();
-    }
-  });
+  }
 
   $("add-site").addEventListener("click", () => openEditor(""));
   // A form so Enter in either address field compares, rather than only the button doing it.

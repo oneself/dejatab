@@ -1,6 +1,7 @@
 // DejaTab settings: the stored shape, the shipped defaults, storage access, host
-// matching for the exclusion and per-site lists, rule resolution for a host, and
-// the normalisation applied to input typed on the options page.
+// matching for the exclusion list, the allow-list and the per-site lists, rule
+// resolution for a host, and the normalisation applied to input typed on the
+// options page.
 //
 // Only loadSettings and saveSettings mention chrome, and they mention it inside
 // their own bodies rather than at import time. Every other function here is a
@@ -30,6 +31,8 @@ export const DEFAULTS = Object.freeze({
   schemaVersion: 1,                       // Lets a later version recognise and migrate an older stored shape.
   bannerTimeoutSeconds: 30,               // Seconds the prompt waits before giving up; 0 waits indefinitely.
   excludedHosts: Object.freeze([]),       // Host entries the extension ignores completely.
+  allowListOnly: false,                   // false is "All sites"; true acts only on allowedHosts.
+  allowedHosts: Object.freeze([]),        // Host entries acted on while allowListOnly is true.
   sites: Object.freeze([]),               // Per-site entries, each naming only the rules it changes.
   rules: DEFAULT_RULES                    // The thirteen rule values, from rules.js.
 });
@@ -127,6 +130,11 @@ export function coerceSettings(stored) {
       : DEFAULTS.bannerTimeoutSeconds,
     rules: coerceRules(src.rules, true),  // Filled in, since the global object owns every field.
     excludedHosts: coerceEntries(src.excludedHosts, false),
+    // A mode that is not a boolean reads as "All sites", the behavior before the
+    // mode existed [allow-list FR-4].
+    allowListOnly: sameShape(src.allowListOnly, DEFAULTS.allowListOnly) ? src.allowListOnly : DEFAULTS.allowListOnly,
+    // Same entry shape as the exclusion list, so the same cleaning [allow-list FR-5].
+    allowedHosts: coerceEntries(src.allowedHosts, false),
     sites: coerceEntries(src.sites, true)
   };
 }
@@ -136,6 +144,18 @@ export function coerceSettings(stored) {
 // notexample.com [FR-14, FR-19]. The dot is what makes the suffix honest.
 function matchesHost(entryHost, host) {
   return host === entryHost || host.endsWith("." + entryHost);
+}
+
+// True when the host matches any entry of a host list, itself or as a subdomain.
+// The exclusion list and the allow-list share one entry shape, so they share
+// this one scan and cannot drift apart in how they match. An empty host, or a
+// list that is not a list, matches nothing.
+function onList(host, entries) {
+  const target = lower(host);
+  if (!target || !Array.isArray(entries)) return false;
+  // Entries are normally cleaned by coerceSettings, but a caller may hand in
+  // settings from elsewhere, so a hostless entry is skipped rather than trusted.
+  return entries.some((entry) => entry && typeof entry.host === "string" && matchesHost(lower(entry.host), target));
 }
 
 // How specific an entry is: mail.example.com has three labels and beats
@@ -148,9 +168,10 @@ function labelCount(host) {
  * The host of an address, lower-cased and without the trailing dot of a fully
  * qualified name, or null when the address will not parse or carries no host at
  * all. This is the one way a host is taken out of a URL: it runs the same helper
- * isExcluded and resolveRules run on their arguments, so a tab's host, a typed
- * entry and a stored entry all end up in one form and the two lists cannot miss
- * a match on a difference of case or a root dot [FR-15, FR-19].
+ * isExcluded, isAllowed and resolveRules run on their arguments, so a tab's
+ * host, a typed entry and a stored entry all end up in one form and none of the
+ * three host lists (exclusion, allow-list, per-site) can miss a match on a
+ * difference of case or a root dot [FR-15, FR-19].
  */
 export function hostOf(url) {
   try {
@@ -200,10 +221,36 @@ export async function saveSettings(settings) {
  * everything, including a per-site entry for the same host [FR-15, FR-16].
  */
 export function isExcluded(host, settings) {
-  const target = lower(host);
-  if (!target) return false;
-  const entries = settings && Array.isArray(settings.excludedHosts) ? settings.excludedHosts : [];
-  return entries.some((entry) => entry && typeof entry.host === "string" && matchesHost(lower(entry.host), target));
+  return onList(host, settings && settings.excludedHosts);
+}
+
+/**
+ * True when the host is on the allow-list, itself or as a subdomain of an
+ * entry. It answers only whether the host is listed and ignores the mode, so
+ * the address tester can say why a host is not acted on; actsOn is what decides
+ * whether DejaTab acts [allow-list FR-5].
+ */
+export function isAllowed(host, settings) {
+  return onList(host, settings && settings.allowedHosts);
+}
+
+/**
+ * True when DejaTab should act on the host at all: look at its navigations,
+ * close its tabs, count it in the sweep. The worker asks only this, so the
+ * exclusion list and the allow-list cannot be combined two ways in two places.
+ * The steps run in order, and every uncertain path ends in false, so DejaTab
+ * never closes a tab on a site the user did not allow [TSD Error Handling].
+ */
+export function actsOn(host, settings) {
+  // An address with no host cannot be on either list, so it is left alone.
+  if (!lower(host)) return false;
+  // Exclusion is checked first because it wins in both modes [allow-list FR-11].
+  if (isExcluded(host, settings)) return false;
+  // Only a stored true turns the mode on; anything else is "All sites".
+  if (!settings || settings.allowListOnly !== true) return true;
+  // With the mode on, only a listed host is acted on, so an empty list acts on
+  // nothing [allow-list FR-9, FR-10, FR-15].
+  return isAllowed(host, settings);
 }
 
 /**

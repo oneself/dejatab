@@ -26,6 +26,34 @@
     </header>
 
     <main>
+      <!-- First because it decides whether anything below applies to a site at all [allow-list FR-16]. -->
+      <section class="sec">
+        <div class="sec-head">
+          <h2 id="mode-title">Where DejaTab acts</h2>
+        </div>
+        <div class="card mode">
+          <div class="mode-choices" role="radiogroup" aria-labelledby="mode-title">
+            <div class="check">
+              <input type="radio" class="cb" name="mode" id="mode-all" value="all">
+              <label for="mode-all">Every site, except the excluded sites below</label>
+            </div>
+            <div class="check">
+              <input type="radio" class="cb" name="mode" id="mode-listed" value="listed">
+              <label for="mode-listed">Only the allowed sites below</label>
+            </div>
+          </div>
+          <!-- A lasting state rather than the result of an action, so it lives here and not in the
+               status line [allow-list FR-18]. options.js shows it. The live region is the wrapper,
+               which is always present, so unhiding the line inside it is announced; a region that is
+               itself unhidden is not reliably read out. It sits outside the radiogroup so the group
+               holds only its two radios. -->
+          <div role="status" aria-live="polite">
+            <p class="notice" id="mode-notice" hidden>No sites are allowed, so DejaTab does nothing. Add a site
+              under Allowed sites.</p>
+          </div>
+        </div>
+      </section>
+
       <section class="sec">
         <div class="sec-head">
           <h2>Matching rules</h2>
@@ -41,6 +69,24 @@
           <p>Removed from an address before it is compared, while the rule above is on.</p>
         </div>
         <div class="card tracking" id="tracking"></div>
+      </section>
+
+      <!-- Directly before Excluded sites so the two host lists read as a pair [allow-list FR-17]. -->
+      <section class="sec">
+        <div class="sec-head">
+          <h2>Allowed sites</h2>
+          <p>In 'Only the allowed sites' mode, DejaTab acts on these sites and nothing else. An entry covers the
+            site and everything under it. Excluded sites stay excluded even when listed here.</p>
+          <p id="allowed-inert" hidden>These have no effect while DejaTab acts on every site.</p>
+        </div>
+        <div class="card list-card">
+          <div id="allowed"></div>
+          <div class="add-row">
+            <label for="add-allowed">Add a site</label>
+            <input type="text" id="add-allowed" class="fld mono grow" placeholder="example.com">
+            <button type="button" class="btn btn-quiet" id="add-allowed-go">Add</button>
+          </div>
+        </div>
       </section>
 
       <section class="sec">

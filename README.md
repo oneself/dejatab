@@ -3,7 +3,9 @@
 DejaTab is a Chrome extension that closes the earlier tabs showing the same
 page as the tab you just navigated. You decide what "the same page" means:
 tracking parameters, trailing slashes, `www.`, the scheme and the query
-string can each be ignored or respected, globally and per site.
+string can each be ignored or respected, globally and per site. DejaTab acts
+on every site except the ones you exclude, or can instead be limited to a
+list of sites you allow.
 
 Before anything closes, DejaTab asks in a banner drawn on the page that just
 loaded, offering four answers: Yes, No, Always (stop asking on this site) and

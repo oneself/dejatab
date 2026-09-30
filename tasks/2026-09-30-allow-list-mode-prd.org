@@ -1,0 +1,177 @@
+#+STARTUP: overview
+#+TITLE: Allow-list mode - Product Requirements Document
+#+STARTUP: showall
+
+* Introduction/Overview
+
+DejaTab acts on every website except the hosts on its exclusion list. A user
+who cares about duplicates on only a handful of sites, such as a webmail
+host, an issue tracker and a documentation site, has to live with DejaTab
+acting everywhere else too: the prompt banner appears on sites the user never
+wanted deduplicated, and the only way to silence it is to exclude those sites
+one at a time, forever.
+
+Allow-list mode inverts the default. The user switches DejaTab from "all
+sites" to "only listed sites" and keeps a list of allowed hosts. In that mode
+DejaTab ignores every site that is not on the list, exactly as it ignores an
+excluded site today. Everything else about DejaTab (the rules, the per-site
+entries, the prompt, the exclusion list) behaves as it does now, inside the
+allowed sites.
+
+Goal: let a user limit DejaTab to a short list of sites they choose, with one
+switch and one list, and without giving up any existing behavior on those
+sites.
+
+* Goals
+
+1. A user can restrict DejaTab to a chosen set of hosts with one setting.
+2. In allow-list mode, a site that is not listed sees no prompt, triggers no
+   close and never has a tab closed.
+3. Switching between the two modes loses nothing: the allow-list, the
+   exclusion list and the per-site entries all survive every switch.
+4. The mode adds no runtime cost: no new background work, no new permission.
+
+* User Stories
+
+1. As someone who only accumulates duplicate tabs on my webmail and issue
+   tracker, I want DejaTab to act on those two sites and nowhere else, so the
+   prompt never appears on a news article or a shopping page.
+2. As a user trying DejaTab for the first time, I want to start it on one
+   site I know well, so I can see what the rules do before trusting them
+   anywhere else.
+3. As an allow-list user, I want to answer Never on an allowed site and have
+   it stop acting there, so I can back out of a site from the prompt itself.
+4. As a user who switches back to "all sites", I want my exclusion list and
+   per-site entries to be as I left them, so the switch is free to try.
+5. As a user whose allow-list is empty by mistake, I want the options page to
+   tell me DejaTab is doing nothing, so I do not conclude it is broken.
+
+* Functional Requirements
+
+** Mode setting
+
+- FR-1. DejaTab has a mode setting with two values: "All sites" and "Only
+  listed sites". The shipped default is "All sites", so an existing or new
+  user sees no change until they switch.
+- FR-2. The mode is stored with the other settings, per Chrome profile, and
+  syncs to the user's other signed-in Chrome installations the same way.
+- FR-3. Changing the mode takes effect immediately, with no restart.
+- FR-4. A stored mode value that is missing or unreadable falls back to "All
+  sites" without affecting any other setting.
+
+** Allow-list
+
+- FR-5. The user keeps a list of allowed sites. An entry is a host, and it
+  matches that host and its subdomains: ~example.com~ covers ~example.com~,
+  ~www.example.com~ and ~mail.example.com~, but not ~notexample.com~. Host
+  matching, case handling and the trailing-dot handling are identical to the
+  exclusion list's.
+- FR-6. Entries are added and removed on the options page only. Typed input
+  is cleaned the same way as an exclusion entry: a pasted URL is reduced to
+  its host, and input that is not a plausible host is rejected with a
+  message. Adding a host that is already listed changes nothing.
+- FR-7. Each entry records the date it was added, like the other lists.
+- FR-8. The allow-list is kept in both modes. In "All sites" mode it is
+  stored and editable but has no effect.
+
+** Behavior in "Only listed sites" mode
+
+- FR-9. A navigation on a host that is not on the allow-list is ignored: no
+  duplicate check, no prompt, no close.
+- FR-10. A tab on a host that is not on the allow-list is never closed as a
+  duplicate, even if the rules would call it the same page as a tab on an
+  allowed host. A site outside the list is inert in both directions, like an
+  excluded site.
+- FR-11. The exclusion list still applies and still wins. A host that is on
+  both the allow-list and the exclusion list is ignored. This holds for
+  subdomains too: allowing ~example.com~ and excluding ~mail.example.com~
+  leaves ~mail.example.com~ ignored.
+- FR-12. Being on the allow-list does not change which rules apply. A site
+  on the allow-list uses the global rules, overridden by its per-site entry
+  if it has one, exactly as in "All sites" mode. A per-site entry alone does
+  not make a site allowed.
+- FR-13. The prompt's four answers keep their current meaning:
+  - Yes and No are unchanged.
+  - Always sets the close-without-asking flag on the host's per-site entry,
+    as today. It does not touch the allow-list.
+  - Never adds the host to the exclusion list and clears the
+    close-without-asking flag, as today. It does not remove the host from
+    the allow-list. The site stops being acted on because exclusion wins
+    (FR-11).
+- FR-14. "Clean up open tabs now" considers only tabs on allowed, non-excluded
+  hosts. Tabs elsewhere are neither counted nor closed.
+- FR-15. With an empty allow-list, DejaTab acts on no site at all.
+
+** Options page
+
+- FR-16. The options page shows the mode setting as a two-choice control at
+  the top of the page, above the global rules, because it decides whether
+  everything below applies to a site at all.
+- FR-17. The allow-list is a new section placed directly before the
+  exclusion list, with the same add and remove controls. In "All sites" mode
+  the section stays visible and editable, with a one-line note that it has no
+  effect until the mode is switched.
+- FR-18. When the mode is "Only listed sites" and the allow-list is empty,
+  the page shows a visible notice near the mode control stating that DejaTab
+  currently acts on no site.
+- FR-19. The rule tester reports the allow-list the same way it reports the
+  exclusion list: in "Only listed sites" mode, when either tested URL is on a
+  host outside the allow-list, it says so and names that host, since no rule
+  would make DejaTab act on it.
+- FR-20. "Reset to defaults" also sets the mode back to "All sites" and
+  empties the allow-list, after the existing confirmation. The confirmation
+  text mentions the allow-list alongside the other lists.
+
+** Performance and permissions
+
+- FR-21. The mode adds no background work, timer or content script. Checking
+  whether a host is allowed costs the same as checking whether it is
+  excluded, once per navigation.
+- FR-22. The mode requests no new permission and removes none. DejaTab keeps
+  its access to all sites in both modes.
+
+* Non-Goals
+
+1. No narrowing of Chrome permissions to the listed sites. Requesting access
+   per site would put a Chrome permission prompt in front of every addition,
+   and is not what this mode is for.
+2. No URL prefixes, paths or wildcard patterns in the allow-list. Entries are
+   hosts, like the other two lists.
+3. No toolbar popup or "Allow this site" button. Clicking the toolbar icon
+   still opens the options page.
+4. No automatic population of the allow-list from Always answers, per-site
+   entries or browsing history.
+5. No per-mode copies of the rules. The global rules and per-site entries are
+   shared by both modes.
+
+* Design Considerations
+
+- The mode control reads as a plain sentence with two choices, for example
+  "DejaTab acts on: ( ) all sites except excluded ones  ( ) only the sites
+  listed below". The wording names what each mode does, not an internal term
+  like "allow-list".
+- The allow-list section title and help text say plainly that listing a site
+  here is what makes DejaTab act on it in "Only listed sites" mode, and that
+  the exclusion list still overrides it.
+- The empty-list notice (FR-18) uses the same style as the page's existing
+  message line, not a modal.
+- The allow-list section reuses the exclusion list's look and controls, so
+  the two lists read as a pair.
+- The README's description of what DejaTab does gains one sentence about the
+  mode, since it currently says DejaTab acts on every site.
+
+* Success Metrics
+
+1. In "Only listed sites" mode, no prompt, close or notification is ever
+   caused by a site outside the list. Checked manually by browsing unlisted
+   sites with duplicates open.
+2. Switching the mode back and forth any number of times leaves the
+   allow-list, the exclusion list and the per-site entries unchanged.
+3. The author runs DejaTab in "Only listed sites" mode for a week with the
+   prompt appearing only on listed sites.
+4. The automated tests cover allowed-host matching, the exclusion-wins
+   interaction and the fallback for a missing or malformed mode value.
+
+* Open Questions
+
+None.

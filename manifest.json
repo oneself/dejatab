@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DejaTab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Closes earlier tabs showing the same page, where you decide what counts as the same page.",
   "permissions": [
     "storage",

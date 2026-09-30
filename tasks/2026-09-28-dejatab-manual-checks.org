@@ -18,6 +18,8 @@ assume the earlier ones passed.
 
 These items close sub-tasks 1.7, 5.2 and 5.8, and they are the content of
 7.7, 7.8 and 7.9 in [[file:2026-09-27-dejatab-tasks.org][the task list]].
+The "Allow-list mode" section is the content of 5.4 in
+[[file:2026-09-30-allow-list-mode-tasks.org][the allow-list task list]].
 
 * Setup, once
 
@@ -28,9 +30,10 @@ These items close sub-tasks 1.7, 5.2 and 5.8, and they are the content of
    editing ~manifest.json~, remove the extension and load it again.
 4. Open DejaTab's settings by clicking its toolbar icon.
 
-Unless an item says otherwise, leave the rules at their shipped values and
-both lists empty. The quickest way back to that state is "Reset to defaults"
-at the bottom of the settings page.
+Unless an item says otherwise, leave the rules at their shipped values, all
+three lists empty, and "Where DejaTab acts" on "Every site, except the
+excluded sites below". The quickest way back to that state is "Reset to
+defaults" at the bottom of the settings page.
 
 * Install and permissions
 
@@ -405,9 +408,10 @@ Proves FR-26.
 
 ** 42. Reset clears the recorded hosts too
 
-With entries in both lists, click "Reset to defaults" and confirm. Every rule
-goes back to its shipped value, the timeout back to 30 seconds, and both
-lists empty, including every host that Always and Never recorded.
+With entries in Excluded sites and Per-site rules, click "Reset to defaults"
+and confirm. Every rule goes back to its shipped value, the timeout back to 30
+seconds, and both lists empty, including every host that Always and Never
+recorded. Check 60 covers what Reset does to the allow-list and the mode.
 
 Proves FR-27.
 
@@ -560,3 +564,127 @@ overstates the case and should be reworded.
 
 Item 16 is the behavioural half of this and matters whichever way the answer
 goes. This item is only about whether that comment is true.
+
+* Allow-list mode
+
+These items check the mode that limits DejaTab to a list of sites, from
+[[file:2026-09-30-allow-list-mode-prd.org][the allow-list PRD]]. Requirements
+are cited as "allow-list FR-n" to keep them apart from the FR numbers above.
+They come last because they switch the mode away from its shipped value:
+every earlier item assumes "Every site, except the excluded sites below".
+When this section is done, "Reset to defaults" puts the page back.
+
+The mode is the "Where DejaTab acts" section at the top of the settings page,
+and the list is the "Allowed sites" section directly before Excluded sites.
+
+** 51. With every site selected, nothing changes
+
+Leave "Where DejaTab acts" on "Every site, except the excluded sites below".
+The Allowed sites section shows "These have no effect while DejaTab acts on
+every site." whether or not it has entries. Add a host to it, then repeat 3
+on a host that is not on the list: the bar appears and Yes closes the
+duplicate exactly as before.
+
+Proves allow-list FR-1, FR-8 and FR-17.
+
+** 52. An empty allow-list does nothing, and says so
+
+Remove every entry from Allowed sites, then select "Only the allowed sites
+below". The mode card shows "No sites are allowed, so DejaTab does nothing.
+Add a site under Allowed sites." Repeat 3 on any site, without reloading
+anything: no bar, nothing closes.
+
+Proves allow-list FR-3, FR-15 and FR-18.
+
+** 53. An allowed site behaves as before, and only it does
+
+With the mode still on "Only the allowed sites below", add the host from 3 to
+Allowed sites. The notice from 52 disappears. Repeat 3 on that host: the bar
+appears and Yes closes the duplicate. Now repeat 3 on any other host: no bar,
+nothing closes.
+
+Proves allow-list FR-5, FR-9 and FR-18.
+
+** 54. An unlisted tab is not closed as a duplicate of an allowed one
+
+Switch on "Ignore a leading www." and make ~www.example.com~ the only entry in
+Allowed sites. Open ~https://example.com/a~, then navigate another tab to
+~https://www.example.com/a~. The rules call them the same page, but
+~example.com~ is not under the ~www.example.com~ entry: no bar appears, and
+the ~example.com~ tab stays open.
+
+Proves allow-list FR-10.
+
+** 55. Never on an allowed site excludes it without unlisting it
+
+On an allowed host, trigger the bar and click Never. Excluded sites lists the
+host as "added by Never", and Allowed sites still lists it. Make two more
+duplicates there: no bar, nothing closes, because the exclusion wins.
+
+Proves allow-list FR-11 and FR-13.
+
+** 56. Unlisting a host while its bar is up saves its tabs
+
+Keep the settings page open in a second window. On an allowed host, trigger
+the bar and leave it unanswered. On the settings page, remove that host from
+Allowed sites. Back in the first window, click Yes before the bar times out:
+nothing closes.
+
+Proves allow-list FR-3 and FR-10, and the TSD's Error Handling row for a host
+removed while a banner is waiting.
+
+** 57. The sweep counts only allowed sites
+
+With the mode on "Only the allowed sites below" and one host on Allowed
+sites, open a duplicate pair on that host and another duplicate pair on a
+host that is not listed. Click "Clean up open tabs now": the question counts
+1 tab across 1 page. Confirm: the allowed pair loses one tab, and both tabs of
+the unlisted pair stay open.
+
+Proves allow-list FR-14.
+
+** 58. The tester names the list that stops it
+
+With the mode on "Only the allowed sites below", one host on Allowed sites and
+another on Excluded sites, use "Try two addresses" three times:
+
+1. Two addresses on a host on neither list: "Nothing would happen.", naming
+   the host once as not an allowed site and telling you to add it under
+   Allowed sites.
+2. Two addresses on the excluded host: "Nothing would happen.", naming the
+   host as an excluded site and telling you to remove it from Excluded sites.
+3. One address on each of those two hosts: both hosts are named, each with
+   its own reason.
+
+Switch back to "Every site, except the excluded sites below" and repeat the
+first case: the tester compares the two addresses as it did before this mode
+existed.
+
+Proves allow-list FR-19.
+
+** 59. Switching modes loses nothing
+
+Put entries in Allowed sites, Excluded sites and Per-site rules. Switch
+between the two options under "Where DejaTab acts" several times, reloading
+the settings page once in between. All three lists keep every entry, with
+their origin labels and dates unchanged.
+
+Proves allow-list FR-8 and the allow-list PRD's second success metric.
+
+** 60. Reset puts the mode back too
+
+With the mode on "Only the allowed sites below" and entries in Allowed sites,
+click "Reset to defaults". The confirmation speaks of all three lists and
+names the allowed sites. Confirm: the mode is back on "Every site, except the
+excluded sites below" and Allowed sites reads "No sites are allowed yet."
+
+Proves allow-list FR-20.
+
+** 61. The mode and the allow-list reach a second machine
+
+Select "Only the allowed sites below" and add two hosts to Allowed sites.
+Sign in to the same Chrome profile on a second machine with the extension
+installed and open its settings: the same mode is selected and the same two
+hosts are listed.
+
+Proves allow-list FR-2.

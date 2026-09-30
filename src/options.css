@@ -266,6 +266,25 @@ select.fld { padding: 7px 8px; }
   word-break: break-all;
 }
 
+/* Where DejaTab acts. The radios reuse .check and .cb from the tracking grid. */
+
+.mode { padding: 18px 20px; }
+.mode-choices { display: flex; flex-direction: column; gap: 12px; }
+
+/* A lasting "DejaTab does nothing" state, in the error message's colours but inside the card, since
+   it describes the settings rather than the result of an action [allow-list FR-18]. */
+.notice {
+  /* A margin rather than a flex gap, so the always-present live region wrapper adds no space while
+     the notice inside it is hidden. */
+  margin-top: 12px;
+  background: var(--surface);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 11px 15px;
+  font-size: 13px;
+  color: var(--text);
+}
+
 /* Matching rules */
 
 .rules { padding: 4px 20px; }

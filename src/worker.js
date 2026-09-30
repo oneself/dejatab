@@ -22,7 +22,7 @@
 // such where it is defined.
 
 import { canonicalKey } from "./rules.js";
-import { loadSettings, saveSettings, isExcluded, resolveRules, withAlways, withNever, hostOf } from "./settings.js";
+import { loadSettings, saveSettings, actsOn, resolveRules, withAlways, withNever, hostOf } from "./settings.js";
 import { showBanner } from "./banner.js";
 
 // The session-storage keys. Session storage is memory-backed, never synced and
@@ -134,7 +134,9 @@ function duplicatesOf(tabs, survivorTabId, survivorKey, rules, settings) {
   return tabs.filter((tab) => {
     if (!tab || typeof tab.id !== "number" || tab.id === survivorTabId) return false;
     if (!isWebUrl(tab.url)) return false;                     // internal pages are never closed [FR-5]
-    if (isExcluded(hostOf(tab.url), settings)) return false;  // an excluded site's tabs are never closed [FR-15]
+    // An excluded site's tabs are never closed [FR-15], nor, with the allow-list on, an unlisted site's
+    // [allow-list FR-10, FR-11].
+    if (!actsOn(hostOf(tab.url), settings)) return false;
     return canonicalKey(tab.url, rules) === survivorKey;
   });
 }
@@ -192,7 +194,9 @@ async function stillMatches(tabId, expectedKey, rules, settings) {
   if (tab.status !== "complete") return false;               // nor is a loading one [FR-4]
   if (!isWebUrl(tab.url)) return false;                      // it went to an internal page [FR-5]
   const host = hostOf(tab.url);
-  if (isExcluded(host, settings)) return false;              // excluded since the plan was made [FR-15]
+  // Excluded, or dropped from the allow-list or its mode switched, since the plan was made [FR-15,
+  // allow-list FR-10, FR-11].
+  if (!actsOn(host, settings)) return false;
   const applicable = rules || resolveRules(host, settings).rules;
   // The address itself may have changed. This is the check that catches a
   // background tab the user navigated somewhere else while the banner was up.
@@ -425,8 +429,9 @@ async function handleNavigation(details) {
   // hostOf is settings.js's, so this worker and the options page normalise a host
   // the same way: lower-cased, no port or userinfo, one trailing dot stripped, and
   // null for an address that will not parse. The dot matters here, because the
-  // dotted form of a host must resolve the same exclusion and per-site entries as
-  // the plain form or the extension would prompt on a site the user excluded.
+  // dotted form of a host must resolve the same exclusion, allow-list and per-site
+  // entries as the plain form, or the extension would prompt on a site the user
+  // excluded, or skip one the user allowed.
   const host = hostOf(details.url);
   if (host === null) return;
 
@@ -441,10 +446,10 @@ async function handleNavigation(details) {
   // question asked at a timeout of 0 never expires, so a missed one would keep
   // the extension quiet until Chrome closes.
   //
-  // This runs before the exclusion check below, and the order is the point: a
-  // banner whose own tab then navigates to an excluded site is exactly the case
-  // that would otherwise leave a dead question suppressing every prompt,
-  // because the excluded host returns early. Clearing costs one memory-backed
+  // This runs before the actsOn check below, and the order is the point: a
+  // banner whose own tab then navigates to an excluded or unlisted site is
+  // exactly the case that would otherwise leave a dead question suppressing
+  // every prompt, because such a host returns early. Clearing costs one memory-backed
   // read on a navigation the extension is about to abandon, which is the
   // cheaper half of the trade.
   let pending = await readPending();
@@ -459,8 +464,10 @@ async function handleNavigation(details) {
 
   const settings = await getSettings();
   // Exclusion outranks everything, including a per-site entry for the same
-  // host, so it short-circuits before any rule work [FR-15, FR-16].
-  if (isExcluded(host, settings)) return;
+  // host, so it short-circuits before any rule work [FR-15, FR-16]. With the
+  // allow-list on, a host not on it is skipped the same way [allow-list FR-9,
+  // FR-11].
+  if (!actsOn(host, settings)) return;
 
   const resolved = resolveRules(host, settings);
   const survivorKey = canonicalKey(details.url, resolved.rules);
@@ -480,8 +487,14 @@ async function handleNavigation(details) {
   // The host was set to close without asking, by the options page or by an
   // earlier Always. Closing is immediate and the notification is what tells the
   // user it happened, since there was no prompt [FR-12].
+  //
+  // The ids come from a listing taken several awaits ago, so each one is
+  // re-checked at close time exactly as the answer path does: a tab pinned,
+  // navigated away, or on a site excluded or dropped from the allow-list in the
+  // meantime stays open [TSD "Event flow for one navigation" step 6].
   if (resolved.autoClose) {
-    const closed = await closeTabs(duplicateTabIds);
+    const entries = duplicateTabIds.map((tabId) => ({ id: tabId, key: survivorKey }));
+    const closed = await closeStillMatching(entries, resolved.rules, settings);
     if (closed > 0) await notifyClosed(closed, label);
     return;
   }
@@ -589,8 +602,10 @@ function pickSurvivor(group, currentTabId) {
 // storage instead of a variable.
 async function planCleanup() {
   const settings = await getSettings();
+  // Only tabs on sites DejaTab acts on are counted: never an excluded site's, and with the allow-list on,
+  // never an unlisted site's [allow-list FR-14].
   const tabs = (await candidateTabs()).filter(
-    (tab) => typeof tab.id === "number" && isWebUrl(tab.url) && !isExcluded(hostOf(tab.url), settings)
+    (tab) => typeof tab.id === "number" && isWebUrl(tab.url) && actsOn(hostOf(tab.url), settings)
   );
 
   // The tab the user is looking at, resolved once for every group rather than

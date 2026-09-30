@@ -10,9 +10,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  actsOn,
   coerceSettings,
   DEFAULTS,
   hostOf,
+  isAllowed,
   isExcluded,
   normalizeHost,
   normalizeParamNames,
@@ -31,6 +33,8 @@ function settings(overrides = {}) {
     bannerTimeoutSeconds: 30,
     rules: { ...DEFAULTS.rules },
     excludedHosts: [],
+    allowListOnly: false,
+    allowedHosts: [],
     sites: [],
     ...overrides
   };
@@ -169,6 +173,8 @@ test("stored settings that are nonsense read as the shipped defaults", () => {
       bannerTimeoutSeconds: 30,
       rules: { ...DEFAULTS.rules, trackingParamsOff: [], userParams: [] },
       excludedHosts: [],
+      allowListOnly: false,
+      allowedHosts: [],
       sites: []
     });
   }
@@ -506,4 +512,123 @@ test("normalizeParamNames reads an array, keeps order and drops duplicates", () 
 test("normalizeParamNames takes a name that is not a word as typed", () => {
   // Any string can legally be a parameter name, so only trimming applies.
   assert.deepEqual(normalizeParamNames(" utm_source , _ga , X-Odd.Name "), ["utm_source", "_ga", "X-Odd.Name"]);
+});
+
+// Allow-list mode. The cases follow the allow-list TSD's Testing Strategy, and
+// the requirement numbers below are that PRD's.
+
+test("the shipped defaults act on all sites with an empty allow-list", () => {
+  assert.equal(DEFAULTS.allowListOnly, false);
+  assert.deepEqual(DEFAULTS.allowedHosts, []);
+  assert.ok(Object.isFrozen(DEFAULTS.allowedHosts)); // A caller that forgets to copy cannot edit it.
+});
+
+test("settings stored before the mode existed load as all sites and keep every other field", () => {
+  const stored = {
+    schemaVersion: 1,
+    bannerTimeoutSeconds: 0,
+    rules: { ...DEFAULTS.rules, ignoreWww: true },
+    excludedHosts: [{ host: "kept.test", source: "user", addedAt: "2026-01-01" }],
+    sites: [{ host: "a.test", rules: { sameHost: true }, autoClose: true }]
+  };
+  const clean = coerceSettings(stored);
+  assert.equal(clean.allowListOnly, false);
+  assert.deepEqual(clean.allowedHosts, []);
+  assert.equal(clean.bannerTimeoutSeconds, 0);
+  assert.equal(clean.rules.ignoreWww, true);
+  assert.deepEqual(clean.excludedHosts, stored.excludedHosts);
+  assert.deepEqual(clean.sites, stored.sites);
+});
+
+test("a malformed mode and a malformed allow-list fall back independently", () => {
+  const allowed = [{ host: "kept.test", source: "user", addedAt: "2026-01-01" }];
+  // A spoiled mode reads as all sites and leaves a good list alone [FR-4].
+  for (const mode of ["true", 1, null, {}, []]) {
+    const clean = coerceSettings({ allowListOnly: mode, allowedHosts: allowed });
+    assert.equal(clean.allowListOnly, false);
+    assert.deepEqual(clean.allowedHosts, allowed);
+  }
+  // A spoiled list empties and leaves a good mode alone.
+  for (const list of ["kept.test", 7, null, { host: "kept.test" }]) {
+    const clean = coerceSettings({ allowListOnly: true, allowedHosts: list });
+    assert.equal(clean.allowListOnly, true);
+    assert.deepEqual(clean.allowedHosts, []);
+  }
+});
+
+test("a stored allow-list entry is cleaned like an exclusion entry", () => {
+  const clean = coerceSettings({
+    allowedHosts: [{ host: "Kept.Test", source: "user" }, { host: "" }, null, "other.test", { host: "Dotted.Test." }]
+  });
+  assert.deepEqual(clean.allowedHosts.map((entry) => entry.host), ["kept.test", "dotted.test"]);
+  assert.equal(clean.allowedHosts[0].source, "user"); // The rest of the entry is kept as stored.
+});
+
+test("an allow-list entry matches its own host and its subdomains, and nothing else", () => {
+  const stored = settings({ allowedHosts: [{ host: "example.com", source: "user", addedAt: "2026-09-30" }] });
+  assert.equal(isAllowed("example.com", stored), true);
+  assert.equal(isAllowed("mail.example.com", stored), true);
+  assert.equal(isAllowed("notexample.com", stored), false);
+  assert.equal(isAllowed("example.org", stored), false);
+  assert.equal(isAllowed("MAIL.Example.COM", stored), true);
+  assert.equal(isAllowed("mail.example.com.", stored), true);
+  assert.equal(isAllowed("", stored), false);
+  // It answers only whether the host is listed: the mode is not consulted.
+  assert.equal(isAllowed("example.com", { ...stored, allowListOnly: true }), true);
+  assert.equal(isAllowed("other.test", { ...stored, allowListOnly: true }), false);
+});
+
+test("actsOn follows every row of the decision table", () => {
+  const entry = [{ host: "example.com" }];
+  // All sites, not excluded: acts whether or not the host is listed.
+  assert.equal(actsOn("example.com", settings()), true);
+  assert.equal(actsOn("example.com", settings({ allowedHosts: entry })), true);
+  // All sites, excluded: never acts, listed or not.
+  assert.equal(actsOn("example.com", settings({ excludedHosts: entry })), false);
+  assert.equal(actsOn("example.com", settings({ excludedHosts: entry, allowedHosts: entry })), false);
+  // Only listed, not excluded, listed: acts.
+  assert.equal(actsOn("mail.example.com", settings({ allowListOnly: true, allowedHosts: entry })), true);
+  // Only listed, not excluded, not listed: does not act [FR-9, FR-10].
+  assert.equal(actsOn("other.test", settings({ allowListOnly: true, allowedHosts: entry })), false);
+  // Only listed, excluded and listed: exclusion wins [FR-11].
+  const both = settings({ allowListOnly: true, allowedHosts: entry, excludedHosts: entry });
+  assert.equal(actsOn("example.com", both), false);
+});
+
+test("actsOn leaves a subdomain inert when the two lists disagree about it", () => {
+  // Allowing the parent and excluding a subdomain: the subdomain is inert and
+  // every other subdomain of the parent stays active.
+  const narrowExclusion = settings({
+    allowListOnly: true,
+    allowedHosts: [{ host: "example.com" }],
+    excludedHosts: [{ host: "mail.example.com" }]
+  });
+  assert.equal(actsOn("mail.example.com", narrowExclusion), false);
+  assert.equal(actsOn("news.example.com", narrowExclusion), true);
+  // Excluding the parent and allowing a subdomain: still inert, since exclusion
+  // is checked first.
+  const narrowAllow = settings({
+    allowListOnly: true,
+    allowedHosts: [{ host: "mail.example.com" }],
+    excludedHosts: [{ host: "example.com" }]
+  });
+  assert.equal(actsOn("mail.example.com", narrowAllow), false);
+});
+
+test("actsOn never acts on an empty or missing host, in either mode", () => {
+  for (const allowListOnly of [false, true]) {
+    const stored = settings({ allowListOnly, allowedHosts: [{ host: "example.com" }] });
+    for (const host of ["", "   ", ".", null, undefined, hostOf("not an address")]) {
+      assert.equal(actsOn(host, stored), false);
+    }
+  }
+});
+
+test("actsOn with the mode on and an empty allow-list acts on nothing", () => {
+  // [FR-15]. A spoiled stored list reads as empty, so it lands here too.
+  for (const stored of [settings({ allowListOnly: true }), coerceSettings({ allowListOnly: true, allowedHosts: 7 })]) {
+    for (const host of ["example.com", "mail.example.com", "localhost", "127.0.0.1"]) {
+      assert.equal(actsOn(host, stored), false);
+    }
+  }
 });

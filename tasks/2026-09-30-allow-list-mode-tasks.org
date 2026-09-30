@@ -1,0 +1,146 @@
+#+STARTUP: overview
+#+TITLE: Allow-list mode - Task List
+#+STARTUP: showall
+
+* Relevant Files
+
+- [[file:2026-09-30-allow-list-mode-prd.org][PRD]] ::
+  Allow-list mode - Product Requirements Document
+- [[file:2026-09-30-allow-list-mode-tsd.org][TSD]] ::
+  Allow-list mode - Technical Specification Document
+- [[file:2026-09-28-dejatab-manual-checks.org][Manual check list]] ::
+  The manual Chrome checklist, which gains an allow-list section in 5.0
+- [[file:../src/settings.js][src/settings.js]] :: Stored shape, defaults,
+  settings cleaning and host matching. Gains the two new fields, ~isAllowed~
+  and ~actsOn~
+- [[file:../test/settings.test.js][test/settings.test.js]] :: Unit tests for
+  the pure parts of =src/settings.js=, including the new functions
+- [[file:../src/worker.js][src/worker.js]] :: The service worker. Four
+  exclusion checks become ~actsOn~ checks
+- [[file:../src/options.html][src/options.html]] :: Options page markup. Gains
+  the mode section and the Allowed sites section
+- [[file:../src/options.js][src/options.js]] :: Options page logic. Mode
+  control, shared host-list code, empty-list notice, tester verdict, reset
+  wording
+- [[file:../src/options.css][src/options.css]] :: Options page styling, only
+  if the existing classes do not cover the new pieces
+- [[file:../README.md][README.md]] :: One sentence on the mode
+
+* Notes
+
+- There is no build step and no package manager. Chrome loads
+  [[file:../src/][src/]] as it is.
+- Run the tests with ~node --test~ from the repository root, bare. A single
+  file: ~node --test test/settings.test.js~. Passing the directory fails.
+- Only the pure functions of [[file:../src/settings.js][src/settings.js]] are
+  unit tested. The worker and the options page are checked by hand in 5.0.
+- Requirement numbers in brackets refer to the allow-list PRD. Read the TSD
+  section named in a sub-task before writing its code.
+- Task 1.0 goes first: it defines ~isAllowed~ and ~actsOn~, which 2.0, 3.0 and
+  4.0 call by name. After it lands, 2.0, 3.0 and 4.0 can be done in parallel.
+  3.0 and 4.0 both edit [[file:../src/options.js][src/options.js]], in
+  different functions.
+- Never let the new mode close a tab on a site the user did not allow. Every
+  uncertain path ends with DejaTab doing nothing [TSD, Error Handling].
+
+* Tasks
+
+- [X] 1.0 Settings: new fields and checks [7/7]
+  - [X] 1.1 Read the TSD's "Data Model", "New functions in src/settings.js"
+    and "Deciding whether DejaTab acts on a host" sections.
+  - [X] 1.2 In [[file:../src/settings.js][src/settings.js]], add
+    ~allowListOnly~ (false) and ~allowedHosts~ (empty, frozen) to ~DEFAULTS~
+    [FR-1, FR-4].
+  - [X] 1.3 In ~coerceSettings~, clean ~allowListOnly~ with the existing shape
+    check, falling back to false, and clean ~allowedHosts~ with the same entry
+    routine the exclusion list uses [FR-4, FR-5]. Do not change
+    ~schemaVersion~: missing fields already take their defaults.
+  - [X] 1.4 Add and export ~isAllowed~: true when the host equals an
+    allow-list entry or is a subdomain of one. Reuse the module's host
+    normalization and suffix-match helpers, as ~isExcluded~ does. It ignores
+    the mode [FR-5].
+  - [X] 1.5 Add and export ~actsOn~, following the four ordered steps in the
+    TSD: no host is false, excluded is false, "All sites" mode is true,
+    otherwise ~isAllowed~ [FR-9, FR-10, FR-11, FR-15].
+  - [X] 1.6 In [[file:../test/settings.test.js][test/settings.test.js]], add
+    automated cases 1 through 9 from the TSD's Testing Strategy, including
+    every row of the decision table.
+  - [X] 1.7 Run ~node --test~ and confirm every suite passes, old and new.
+
+- [X] 2.0 Worker: use actsOn [4/4]
+  - [X] 2.1 Read the TSD's "Changed call sites in src/worker.js" and "Event
+    flow for one navigation".
+  - [X] 2.2 In [[file:../src/worker.js][src/worker.js]], replace the four
+    ~isExcluded~ checks with a negated ~actsOn~: the navigation handler's
+    short-circuit, ~duplicatesOf~, ~stillMatches~ and ~planCleanup~ [FR-9,
+    FR-10, FR-14].
+  - [X] 2.3 Update the comment beside each changed check so it names the
+    allow-list as well as the exclusion list. Replace the ~isExcluded~ import
+    with ~actsOn~, since the worker no longer calls ~isExcluded~.
+  - [X] 2.4 Confirm with ~rg -n isExcluded src/worker.js~ that no call
+    remains, and with ~rg -n actsOn src/worker.js~ that there are exactly four
+    calls plus the import.
+
+- [~] 3.0 Options page: mode control and Allowed sites list [7/9]
+  - [X] 3.1 Read the TSD's "Options page" section: section order, mode
+    control, Allowed sites list, empty-list notice and reset.
+  - [X] 3.2 In [[file:../src/options.html][src/options.html]], add a "Where
+    DejaTab acts" section as the first section of ~main~, holding a radio pair
+    with the two sentences the TSD gives and a hidden notice line [FR-16].
+  - [X] 3.3 Add an "Allowed sites" section directly before "Excluded sites",
+    with the TSD's section text, a list container, a hidden "no effect" line,
+    and an add row matching the exclusion list's [FR-17].
+  - [~] 3.4 In [[file:../src/options.js][src/options.js]], generalize
+    ~renderExcluded~ and the ~addExcluded~ handler into one list renderer and
+    one add handler that take the settings field name and the wording. Wire
+    the exclusion list through them with its current wording unchanged, and
+    confirm on the page that it looks and behaves exactly as before.
+    (needs Chrome check by user)
+  - [X] 3.5 Wire the allow-list through the same renderer and handler with the
+    TSD's wording: empty state, "added on <date>", "Stop allowing <host>",
+    "<host> is already allowed." [FR-6, FR-7].
+  - [X] 3.6 Bind the radio pair: a change writes ~allowListOnly~ through the
+    existing persist path; rendering sets the checked option from settings, so
+    a change from another tab shows up [FR-3].
+  - [X] 3.7 On render, show the empty-list notice when the mode is "Only
+    listed sites" and the allow-list is empty, and show the "no effect" line
+    when the mode is "All sites" [FR-8, FR-18].
+  - [X] 3.8 Change the reset confirmation text from "both lists" to "all three
+    lists" and name the allowed sites. No logic change: reset already writes a
+    copy of ~DEFAULTS~ [FR-20].
+  - [~] 3.9 Style the mode card and the notice in
+    [[file:../src/options.css][src/options.css]] only where existing classes
+    fall short. The notice uses the error message's colors; check both light
+    and dark themes. Keep color hex codes upper-case.
+    (needs Chrome check by user)
+
+- [~] 4.0 Options page: address tester [2/3]
+  - [X] 4.1 Read the TSD's "Address tester" subsection.
+  - [X] 4.2 In [[file:../src/options.js][src/options.js]], extend the
+    tester's exclusion block: give each address a reason, "excluded" from
+    ~isExcluded~ or "not allowed" when the mode is on and ~isAllowed~ is
+    false, and print "Nothing would happen." with one clause per distinct host
+    and the list to change [FR-19].
+  - [~] 4.3 Check by hand: an unlisted host, an excluded host, one of each,
+    and both addresses on one host each produce the wording the TSD gives.
+    With the mode off, the tester behaves as before.
+    (needs Chrome check by user)
+
+- [~] 5.0 Docs and manual checks [4/5]
+  - [X] 5.1 Add one sentence to [[file:../README.md][README.md]]'s
+    introduction saying DejaTab can be limited to a list of allowed sites.
+  - [X] 5.2 Add an "Allow-list mode" section to
+    [[file:2026-09-28-dejatab-manual-checks.org][the manual checklist]],
+    holding the TSD's eleven manual checks, each written in that file's style:
+    setup, action, expected result, and the requirement it proves.
+  - [X] 5.3 Run ~node --test~ and confirm every suite passes.
+  - [ ] 5.4 Reload the extension at ~chrome://extensions~ and work through the
+    new checklist section, then the existing "The four answers" and "The
+    sweep" sections in "All sites" mode to confirm nothing regressed.
+    (needs Chrome check by user)
+  - [X] 5.5 Apply the review, QA and security fixes: stale comments in
+    [[file:../src/worker.js][src/worker.js]] and
+    [[file:../src/settings.js][src/settings.js]], one shared list-scan helper
+    behind ~isExcluded~ and ~isAllowed~, a close-time re-check on the Always
+    auto-close path, a live region on the empty-list notice, and checklist
+    wording.

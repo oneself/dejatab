@@ -12,7 +12,6 @@ import { TRACKING_PARAMS, DEFAULT_RULES, canonicalKey, samePage, explainDifferen
 // its own, and that means a baseline where nothing else is interfering.
 const ALL_OFF = {
   ignoreFragment: false,
-  ignoreTrailingSlash: false,
   ignoreWww: false,
   ignoreScheme: false,
   dropTrackingParams: false,
@@ -43,8 +42,10 @@ test("R1 ignoreFragment: two anchors into one page", () => {
   matchesOnlyWhen("https://example.com/a#intro", "https://example.com/a#summary", { ignoreFragment: true });
 });
 
-test("R2 ignoreTrailingSlash: /docs and /docs/", () => {
-  matchesOnlyWhen("https://example.com/docs", "https://example.com/docs/", { ignoreTrailingSlash: true });
+test("R2 a trailing slash is always ignored, with every switch off", () => {
+  assert.equal(samePage("https://example.com/docs", "https://example.com/docs/", ALL_OFF), true);
+  // The root keeps its slash, since there it is the whole path.
+  assert.equal(canonicalKey("https://example.com/", ALL_OFF), "https://example.com/");
 });
 
 test("R3 ignoreWww: www.example.com and example.com", () => {
@@ -212,11 +213,9 @@ test("a trailing empty segment counts as a segment", () => {
   // same way it truncates "/a/b/c" and N=3 keeps the empty one.
   const two = only({ samePathPrefix: true, pathPrefixSegments: 2 });
   assert.equal(canonicalKey("https://example.com/a/b/", two), "https://example.com/a/b");
+  // N=3 keeps the empty one, and R2 then tidies the truncated path's slash away.
   const three = only({ samePathPrefix: true, pathPrefixSegments: 3 });
-  assert.equal(canonicalKey("https://example.com/a/b/", three), "https://example.com/a/b/");
-  // With R2 also on, the truncated path is tidied after the truncation.
-  const tidied = only({ samePathPrefix: true, pathPrefixSegments: 3, ignoreTrailingSlash: true });
-  assert.equal(canonicalKey("https://example.com/a/b/", tidied), "https://example.com/a/b");
+  assert.equal(canonicalKey("https://example.com/a/b/", three), "https://example.com/a/b");
 });
 
 // --- Case 7: edge addresses ------------------------------------------------
@@ -299,7 +298,6 @@ test("every differing pair reports a piece, and the rule that would match it", (
   // what they can do about it.
   const cases = [
     ["https://example.com/a#x", "https://example.com/a#y", "fragment", "ignoreFragment"],
-    ["https://example.com/docs", "https://example.com/docs/", "path", "ignoreTrailingSlash"],
     ["https://www.example.com/a", "https://example.com/a", "host", "ignoreWww"],
     ["http://example.com/a", "https://example.com/a", "scheme", "ignoreScheme"],
     ["https://example.com/a?utm_id=9", "https://example.com/a", "query", "dropTrackingParams"],
@@ -396,7 +394,6 @@ test("an address that will not parse is reported by side", () => {
 test("the shipped defaults are the ones the TSD's table states", () => {
   assert.deepEqual({ ...DEFAULT_RULES }, {
     ignoreFragment: true,
-    ignoreTrailingSlash: true,
     ignoreWww: false,
     ignoreScheme: false,
     dropTrackingParams: true,

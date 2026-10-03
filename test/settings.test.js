@@ -47,7 +47,8 @@ test("the shipped defaults are the ones the data model states", () => {
   assert.deepEqual(DEFAULTS.sites, []);
   // The two rules on by default plus tracking removal, everything else off.
   assert.equal(DEFAULTS.rules.ignoreFragment, true);
-  assert.equal(DEFAULTS.rules.ignoreTrailingSlash, true);
+  // R2 is not a switch, so a stored value for it has nowhere to go.
+  assert.equal("ignoreTrailingSlash" in DEFAULTS.rules, false);
   assert.equal(DEFAULTS.rules.dropTrackingParams, true);
   assert.equal(DEFAULTS.rules.dropUserParams, true);
   assert.equal(DEFAULTS.rules.ignoreWww, false);

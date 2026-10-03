@@ -36,6 +36,14 @@
   --warn: #8A4F13;
   --switch-off: #8F8C83;
   --shadow: rgba(0, 0, 0, 0.35);
+  /* One colour per piece of an address, shared by the diagram and every address the page shows.
+     Each is 4.5:1 or better against both --surface and --code-bg. */
+  --part-scheme: #C2410C;
+  --part-site: #1E63CE;
+  --part-port: #946200;
+  --part-path: #137535;
+  --part-query: #7E3FC8;
+  --part-hash: #BE185D;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -73,6 +81,12 @@
     --warn: #E0A263;
     --switch-off: #949084;
     --shadow: rgba(0, 0, 0, 0.6);
+    --part-scheme: #FB923C;
+    --part-site: #7FB0F5;
+    --part-port: #FACC15;
+    --part-path: #4ADE80;
+    --part-query: #C4A0FA;
+    --part-hash: #F472B6;
   }
 }
 
@@ -266,6 +280,59 @@ select.fld { padding: 7px 8px; }
   word-break: break-all;
 }
 
+/* The pieces of an address, coloured the same in the diagram and in every address options.js
+   builds, so a piece named in a rule can be found in the diagram by its colour. */
+.p-scheme { color: var(--part-scheme); }
+.p-site { color: var(--part-site); }
+.p-port { color: var(--part-port); }
+.p-path { color: var(--part-path); }
+.p-query { color: var(--part-query); }
+.p-hash { color: var(--part-hash); }
+
+/* Parts of an address: a grid with one column per piece of the example address. Row 1 holds the
+   labels above the address, row 2 the address, row 3 the labels below.
+   Labels are positioned out of the flow, so a label wider than its piece cannot push the address
+   apart; the side padding is the room they overhang into. */
+/* margin: 0 drops the default figure indent, so the card lines up with the others. */
+.anatomy { margin: 0; padding: 18px 20px; overflow-x: auto; }
+
+.anatomy-grid {
+  display: grid;
+  grid-template-columns: repeat(10, max-content);
+  /* Centred while it fits, and scrollable from its left edge when it does not. */
+  width: max-content;
+  margin: 0 auto;
+  padding: 0 44px;
+}
+
+.anatomy-grid .t { grid-row: 2; font-family: var(--mono); font-size: 16px; padding: 4px 0; }
+
+/* A bracket: three sides of a box in the piece's colour, open towards the address. */
+.tag { position: relative; height: 9px; margin: 0 2px; border: 1.5px solid currentColor; }
+.tag.top { grid-row: 1; align-self: end; margin-top: 20px; border-bottom: none; }
+.tag.bot { grid-row: 3; margin-bottom: 20px; border-top: none; }
+
+.tag b {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tag.top b { bottom: calc(100% + 3px); }
+.tag.bot b { top: calc(100% + 3px); }
+
+/* A piece the current rules ignore, and its labels. Opacity rather than new colours, as on the
+   greyed-out allow-list card, so both themes follow from the existing variables. */
+.anatomy-grid .t, .anatomy-grid .tag { transition: opacity 0.15s; }
+.anatomy-grid .off { opacity: 0.3; }
+
+.anatomy figcaption { margin-top: 6px; font-size: 13px; color: var(--dim); text-align: center; }
+
 /* Where DejaTab acts. The radios reuse .check and .cb from the tracking grid. */
 
 .mode { padding: 18px 20px; }
@@ -338,7 +405,14 @@ select.fld { padding: 7px 8px; }
   border-bottom: 1px solid var(--line-soft);
 }
 
-.row .host { font-family: var(--mono); font-size: 13px; flex-grow: 1; word-break: break-all; }
+.row .host {
+  font-family: var(--mono);
+  font-size: 13px;
+  flex-grow: 1;
+  word-break: break-all;
+  /* A listed entry is a site, so it takes the site's colour from the diagram. */
+  color: var(--part-site);
+}
 .origin { font-size: 12px; color: var(--muted); }
 .empty { padding: 12px 0; font-size: 13px; color: var(--muted); }
 
@@ -352,7 +426,14 @@ select.fld { padding: 7px 8px; }
 .sites:empty { display: none; }
 .site { padding: 16px 20px; display: flex; gap: 16px; }
 .site-main { flex-grow: 1; min-width: 0; }
-.site-host { font-family: var(--mono); font-size: 14px; font-weight: 500; word-break: break-all; }
+.site-host {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 500;
+  word-break: break-all;
+  /* The site's colour from the diagram, as on the host list rows. */
+  color: var(--part-site);
+}
 .chips { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
 
 .chip {

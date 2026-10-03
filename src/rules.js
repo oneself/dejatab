@@ -7,7 +7,8 @@
 // they both come through here.
 //
 // Two names are used throughout. R1 through R10 are the switches in the PRD's
-// "Matching rules" section. The numbered steps in the comments are the steps of
+// "Matching rules" section, except R2 (a trailing slash), which is no longer a
+// switch: it always applies. The numbered steps in the comments are the steps of
 // the TSD's "Canonical key" section, whose order is itself part of the
 // specification: later steps depend on what earlier ones left behind.
 
@@ -41,7 +42,6 @@ export const TRACKING_PARAMS = Object.freeze([
 // the fields it left out.
 export const DEFAULT_RULES = Object.freeze({
   ignoreFragment: true,           // R1
-  ignoreTrailingSlash: true,      // R2
   ignoreWww: false,               // R3
   ignoreScheme: false,            // R4
   dropTrackingParams: true,       // R5
@@ -64,7 +64,6 @@ export const DEFAULT_RULES = Object.freeze({
 // broad rules would answer first and R8 and R10 could never be named at all.
 const RULE_SWITCHES = Object.freeze([
   "ignoreFragment",
-  "ignoreTrailingSlash",
   "ignoreWww",
   "ignoreScheme",
   "dropTrackingParams",
@@ -124,10 +123,11 @@ function canonicalPath(pathname, rules) {
   if (rules.samePathPrefix) {
     path = "/" + pathname.split("/").slice(1, 1 + rules.pathPrefixSegments).join("/");
   }
-  // R2 removes one trailing slash, unless the path is just the root, where the
+  // R2 removes one trailing slash, always: "/docs" and "/docs/" are one page,
+  // and no user needs them kept apart. The root is left alone, since there the
   // slash is the whole path and removing it would leave nothing to compare. It
   // runs after R10 so a path R10 truncated is tidied too.
-  if (rules.ignoreTrailingSlash && path.length > 1 && path.endsWith("/")) {
+  if (path.length > 1 && path.endsWith("/")) {
     path = path.slice(0, -1);
   }
   return path;

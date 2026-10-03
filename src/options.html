@@ -74,6 +74,56 @@
         </div>
       </section>
 
+      <!-- Names the pieces of an address in the words the rules below use, so a rule such as "Ignore
+           fragment" can be read without knowing what a fragment is. Above the rules because they
+           are where nearly every one of these words appears. Each piece's colour is the one
+           options.js gives that piece in every address it shows. -->
+      <section class="sec">
+        <div class="sec-head">
+          <h2>Parts of an address</h2>
+          <p>The rules below refer to these pieces of an address. A greyed-out piece is one your rules ignore, so
+            it does not decide whether two tabs match.</p>
+        </div>
+        <figure class="card anatomy">
+          <!-- One picture to a screen reader: the label reads the pieces in order, instead of the
+               fragments and bracket labels interleaved the way the grid lays them out. -->
+          <div class="anatomy-grid" role="img"
+               aria-label="An example address, https://www.example.com:8080/products/sneakers?a=1&amp;utm_source=news#intro.
+                 Protocol: https. Site: www.example.com, where www is a subdomain. Port: 8080. Path:
+                 /products/sneakers, two path segments, products and sneakers. Parameters: everything after the question mark,
+                 here a=1 and utm_source=news, a tracking parameter. Fragment, the part after #: intro.">
+            <!-- The address, one cell per column. data-part names a piece and data-alt is a different value
+                 for it: options.js greys the piece out when swapping in data-alt leaves the address's key
+                 unchanged under the current rules. data-parts names the pieces a cell depends on, and the
+                 cell greys out when all of them have. -->
+            <span class="t p-scheme" style="grid-column: 1" data-part="proto" data-alt="http://">https://</span>
+            <span class="t p-site" style="grid-column: 2" data-part="www" data-alt="">www.</span>
+            <span class="t p-site" style="grid-column: 3" data-part="host" data-alt="example.org">example.com</span>
+            <span class="t p-port" style="grid-column: 4" data-part="port" data-alt=":8081">:8080</span>
+            <span class="t p-path" style="grid-column: 5" data-part="p1" data-alt="/other">/products</span>
+            <span class="t p-path" style="grid-column: 6" data-part="p2" data-alt="/boots">/sneakers</span>
+            <span class="t p-query" style="grid-column: 7" data-parts="tracking a">?</span>
+            <span class="t p-query" style="grid-column: 8" data-part="a" data-alt="a=2">a=1</span>
+            <span class="t p-query" style="grid-column: 9" data-part="tracking" data-alt="&amp;utm_source=mail">&amp;utm_source=news</span>
+            <span class="t p-hash" style="grid-column: 10" data-part="hash" data-alt="#other">#intro</span>
+            <!-- Above: the finer pieces the rules name. -->
+            <span class="tag top p-site" style="grid-column: 2" data-parts="www"><b>Subdomain</b></span>
+            <span class="tag top p-path" style="grid-column: 5" data-parts="p1"><b>Segment 1</b></span>
+            <span class="tag top p-path" style="grid-column: 6" data-parts="p2"><b>Segment 2</b></span>
+            <span class="tag top p-query" style="grid-column: 9" data-parts="tracking"><b>Tracking parameter</b></span>
+            <!-- Below: the six pieces themselves. -->
+            <span class="tag bot p-scheme" style="grid-column: 1" data-parts="proto"><b>Protocol</b></span>
+            <span class="tag bot p-site" style="grid-column: 2 / 4" data-parts="www host"><b>Site</b></span>
+            <span class="tag bot p-port" style="grid-column: 4" data-parts="port"><b>Port</b></span>
+            <span class="tag bot p-path" style="grid-column: 5 / 7" data-parts="p1 p2"><b>Path</b></span>
+            <span class="tag bot p-query" style="grid-column: 7 / 10" data-parts="tracking a"><b>Parameters</b></span>
+            <span class="tag bot p-hash" style="grid-column: 10" data-parts="hash"><b>Fragment</b></span>
+          </div>
+          <figcaption>A site entry covers its subdomains too: example.com also covers www.example.com and
+            mail.example.com.</figcaption>
+        </figure>
+      </section>
+
       <section class="sec">
         <div class="sec-head">
           <h2>Matching rules</h2>

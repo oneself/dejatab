@@ -15,7 +15,7 @@
 // The one import: the shipped rule values live in rules.js, and the dependency
 // runs in this direction only. rules.js imports nothing, which is what lets it
 // fill in a field a caller left out without asking anyone, and one table of
-// thirteen defaults cannot drift from a second copy that does not exist.
+// twelve defaults cannot drift from a second copy that does not exist.
 import { DEFAULT_RULES } from "./rules.js";
 
 // The single chrome.storage.sync key everything lives under. One key rather
@@ -34,7 +34,7 @@ export const DEFAULTS = Object.freeze({
   allowListOnly: false,                   // false is "All sites"; true acts only on allowedHosts.
   allowedHosts: Object.freeze([]),        // Host entries acted on while allowListOnly is true.
   sites: Object.freeze([]),               // Per-site entries, each naming only the rules it changes.
-  rules: DEFAULT_RULES                    // The thirteen rule values, from rules.js.
+  rules: DEFAULT_RULES                    // The twelve rule values, from rules.js.
 });
 
 // Puts a host into the form every comparison in this module uses: trimmed,

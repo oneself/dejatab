@@ -31,29 +31,24 @@ import {
   today
 } from "./settings.js";
 
-// The ten rules of the PRD's "Matching rules" section, in the order FR-23 fixes, each with the
+// The rules of the PRD's "Matching rules" section, in the order FR-23 fixes, each with the
 // plain sentence and the example pair the Design Considerations require. `field` is the name in the
 // stored rules object, so this table is also the mapping from a control to storage. {N} in a label
 // is where R10's segment count goes, both in the row and in a per-site summary chip.
 const RULE_META = [
   {
     field: "ignoreFragment",
-    label: "Ignore the part after #",
+    label: "Ignore fragment",
     example: ["example.com/post#intro", "example.com/post"]
   },
   {
-    field: "ignoreTrailingSlash",
-    label: "Ignore a trailing slash",
-    example: ["example.com/docs/", "example.com/docs"]
-  },
-  {
     field: "ignoreWww",
-    label: "Ignore a leading www.",
+    label: "Ignore the www subdomain",
     example: ["www.example.com/a", "example.com/a"]
   },
   {
     field: "ignoreScheme",
-    label: "Ignore http and https",
+    label: "Ignore protocol",
     example: ["http://example.com/a", "https://example.com/a"]
   },
   {
@@ -71,7 +66,7 @@ const RULE_META = [
   },
   {
     field: "dropQuery",
-    label: "Drop everything after ?",
+    label: "Drop all parameters",
     example: ["example.com/search?q=cats", "example.com/search"],
     note: "Makes the two rules above irrelevant while it is on."
   },
@@ -82,16 +77,16 @@ const RULE_META = [
   },
   {
     field: "sameHost",
-    label: "Any two tabs on the same site are the same page",
+    label: "Compare the site only",
     example: ["mail.example.com/inbox", "mail.example.com/sent"],
     note: "Meant for webmail and admin consoles. Set it per site rather than here."
   },
   {
     field: "samePathPrefix",
-    label: "Same site and the first {N} parts of the path",
+    label: "Compare the site and the first {N} path segments",
     example: ["example.com/issues/12", "example.com/issues/34"],
     // R10's N, written into the middle of the sentence the way the mockup has it.
-    number: { field: "pathPrefixSegments", label: "How many parts of the path to compare", min: 1, max: 8 }
+    number: { field: "pathPrefixSegments", label: "How many path segments to compare", min: 1, max: 8 }
   }
 ];
 
@@ -99,12 +94,12 @@ const RULE_META = [
 // verdict says what differs before it says which switch would match them, because what differs is
 // the fact and the switch is the advice.
 const PIECE_PHRASES = {
-  scheme: "the schemes differ",
+  scheme: "the protocols differ",
   host: "the sites differ",
   port: "the ports differ",
   path: "the paths differ",
   query: "the parameters differ",
-  fragment: "the parts after # differ"
+  fragment: "the fragments differ"
 };
 
 // The two verdict marks. Constant markup, so this is the one place innerHTML is used and nothing
@@ -134,6 +129,30 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+// The pieces of an address, in the order they appear, each with the colour class options.html's
+// "Parts of an address" diagram gives it. The scheme takes its "//" along, since a key with R4 on
+// starts at "//", and every piece is optional, since the rule examples leave the scheme out.
+const ADDRESS_PIECES = /^((?:[a-z][a-z0-9+.-]*:)?\/\/)?([^/:?#]*)(:\d+)?([^?#]*)(\?[^#]*)?(#.*)?$/i;
+const PIECE_CLASSES = ["p-scheme", "p-site", "p-port", "p-path", "p-query", "p-hash"];
+
+// An address as a .u span with each piece in its diagram colour. Text nodes only, as everywhere on
+// this page. ponytail: a regex rather than URL, because examples and keys are not full addresses; a
+// bracketed IPv6 host is coloured wrongly but still reads correctly, since the text is never changed.
+function colorAddress(text) {
+  const span = el("span", "u");
+  const match = ADDRESS_PIECES.exec(text);
+  // Anything the pattern cannot split is shown as it is, uncoloured.
+  if (!match) {
+    span.textContent = text;
+    return span;
+  }
+  // One child per piece present; the capture groups line up with PIECE_CLASSES.
+  PIECE_CLASSES.forEach((cls, i) => {
+    if (match[i + 1]) span.append(el("span", cls, match[i + 1]));
+  });
+  return span;
 }
 
 // A real button, typed so it can sit inside the tester's form without submitting it.
@@ -194,7 +213,7 @@ function patchRules(partial) {
   return { ...settings, rules: { ...settings.rules, ...partial } };
 }
 
-// Build the ten rule rows once. The switches are then only ever updated in place, which is what
+// Build the rule rows once. The switches are then only ever updated in place, which is what
 // lets a user type in R6's field without the row being rebuilt under the cursor.
 function buildRules() {
   const box = $("rules");
@@ -228,7 +247,7 @@ function buildRules() {
         // was moved, so the user is not left thinking the number they typed was stored.
         const n = normalizeSegments(field.value);
         if (String(n) !== field.value.trim()) {
-          showStatus("The path can be compared 1 to 8 parts deep. DejaTab used " + n + ".");
+          showStatus("The path can be compared 1 to 8 segments deep. DejaTab used " + n + ".");
         }
         persist(patchRules({ pathPrefixSegments: n }));
       });
@@ -241,7 +260,7 @@ function buildRules() {
     // The example pair, so the rule can be understood without experimenting on real tabs.
     if (meta.example) {
       const example = el("span", "rule-example");
-      example.append(el("span", "u", meta.example[0]), el("span", "eq", " = "), el("span", "u", meta.example[1]));
+      example.append(colorAddress(meta.example[0]), el("span", "eq", " = "), colorAddress(meta.example[1]));
       body.append(example);
     }
     if (meta.desc) body.append(el("span", "rule-desc", meta.desc));
@@ -308,6 +327,28 @@ function render() {
   renderMode();
   for (const field of Object.keys(HOST_LISTS)) renderHosts(field);
   renderSites();
+  renderAnatomy(rules);
+}
+
+// Grey out the diagram's pieces that the global rules ignore. Each piece is tested by swapping in its
+// data-alt value and asking rules.js for the key: an unchanged key means the piece does not decide a
+// match. Asking the matcher rather than mapping switches to pieces keeps the diagram from ever
+// disagreeing with it, R9, R10 and the parameter lists included.
+function renderAnatomy(rules) {
+  const cells = [...document.querySelectorAll(".anatomy-grid .t")];
+  // The example address, with one cell's text replaced by its stand-in when a cell is given.
+  const address = (swapped) => cells.map((cell) => (cell === swapped ? cell.dataset.alt : cell.textContent)).join("");
+  const key = canonicalKey(address(null), rules);
+  // The names of the pieces whose stand-in leaves the key as it was.
+  const ignored = new Set(cells.filter((cell) => cell.dataset.part && canonicalKey(address(cell), rules) === key)
+    .map((cell) => cell.dataset.part));
+  for (const node of document.querySelectorAll(".anatomy-grid [data-part]")) {
+    node.classList.toggle("off", ignored.has(node.dataset.part));
+  }
+  // A label, or the "?", greys out only once every piece it covers has.
+  for (const node of document.querySelectorAll(".anatomy-grid [data-parts]")) {
+    node.classList.toggle("off", node.dataset.parts.split(" ").every((part) => ignored.has(part)));
+  }
 }
 
 // The mode control and its two dependent lines [allow-list FR-3, FR-8, FR-18]. The radios are set
@@ -482,7 +523,7 @@ function openEditor(host) {
   // The three rule fields that are not a switch: R10's count, R6's names, and the built-in
   // tracking names this site keeps. Each is left out of the stored entry when it is empty, so an
   // untouched field means inherited here too.
-  card.append(editorField("ed-pathPrefixSegments", "How many parts of the path to compare (R10)",
+  card.append(editorField("ed-pathPrefixSegments", "How many path segments to compare (R10)",
     "number", rules.pathPrefixSegments === undefined ? "" : String(rules.pathPrefixSegments)));
   card.append(editorField("ed-userParams", "Parameters to drop on this site", "text",
     (rules.userParams || []).join(", ")));
@@ -596,7 +637,7 @@ function runTester() {
 
   if (answer.invalid) {
     verdict.append(mark("diff"), el("span", "", "Address " + answer.invalid.toUpperCase() +
-      " is not an address DejaTab can read. Include the scheme, as in https://example.com/page."));
+      " is not an address DejaTab can read. Include the protocol, as in https://example.com/page."));
     return;
   }
 
@@ -614,7 +655,7 @@ function runTester() {
   }
   if (answer.same) {
     verdict.append(mark("same"), el("span", "", "The same page."));
-    keys.append(el("span", "", "After your rules run, both addresses are "), el("span", "u", answer.key));
+    keys.append(el("span", "", "After your rules run, both addresses are "), colorAddress(answer.key));
     keys.hidden = false;
     return;
   }
@@ -635,8 +676,8 @@ function runTester() {
     line.append(el("span", "said", "No single rule would match them."));
   }
   verdict.append(mark("diff"), line);
-  keys.append(el("span", "", "After your rules run: "), el("span", "u", canonicalKey(a, rules)),
-    el("span", "", " against "), el("span", "u", canonicalKey(b, rules)));
+  keys.append(el("span", "", "After your rules run: "), colorAddress(canonicalKey(a, rules)),
+    el("span", "", " against "), colorAddress(canonicalKey(b, rules)));
   keys.hidden = false;
 }
 
